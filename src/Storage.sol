@@ -4,10 +4,9 @@ pragma solidity >=0.8.4;
 // import {SafeMulticallable} from "solbase/utils/SafeMulticallable.sol";
 import {IStorage} from "src/interface/IStorage.sol";
 
-/// @notice Directory for Quests
-/// @author Modified from Kali (https://github.com/kalidao/kali-contracts/blob/main/contracts/access/KaliAccessManager.sol)
-/// @author Storage pattern inspired by RocketPool (https://github.com/rocket-pool/rocketpool/blob/6a9dbfd85772900bb192aabeb0c9b8d9f6e019d1/contracts/contract/RocketStorage.sol)
-
+/// @notice An extensible DAO-managed storage
+/// @author audsssy.eth 
+/// credit: inspired by RocketPool (https://github.com/rocket-pool/rocketpool/blob/6a9dbfd85772900bb192aabeb0c9b8d9f6e019d1/contracts/contract/RocketStorage.sol)
 contract Storage {
     /// -----------------------------------------------------------------------
     /// Errors
@@ -40,16 +39,13 @@ contract Storage {
     /// -----------------------------------------------------------------------
 
     modifier onlyOperator() {
+        // TODO: Double check if need to remove second condition
         if (msg.sender != this.getDao() && msg.sender != address(this)) {
             revert NotOperator();
         }
         _;
     }
 
-    modifier playground(address target) {
-        assert(IStorage(target).getBool(keccak256(abi.encodePacked("playground.", target))));
-        _;
-    }
     /// -----------------------------------------------------------------------
     /// General Storage - Setter Logic
     /// -----------------------------------------------------------------------
@@ -57,11 +53,6 @@ contract Storage {
     /// @param dao The DAO address.
     function setDao(address dao) external onlyOperator {
         addressStorage[keccak256(abi.encodePacked("dao"))] = dao;
-    }
-
-    /// @dev Determine if target contract is a Playground contract.
-    function setPlaygroundContract(address target) external onlyOperator playground(target) {
-        if (target != address(0)) booleanStorage[keccak256(abi.encodePacked("playground.", target))] = true;
     }
 
     /// @param _key The key for the record.
