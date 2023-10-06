@@ -2,6 +2,7 @@
 pragma solidity >=0.8.4;
 
 import {LibString} from "../lib/solbase/src/utils/LibString.sol";
+// import {SafeTransferLib} from "../lib/solbase/src/utils/SafeTransferLib.sol";
 
 import {IStorage} from "./interface/IStorage.sol";
 import {Storage} from "./Storage.sol";
@@ -29,6 +30,7 @@ contract KaliBerger is Storage {
     error NotInitialized();
     error InvalidPurchase();
     error InvalidClaim();
+    error InvalidAmount();
 
     /// -----------------------------------------------------------------------
     /// Constructor
@@ -72,11 +74,15 @@ contract KaliBerger is Storage {
     /// @notice Escrow ERC721 NFT before making it available for purchase.
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
-    function escrow(address token, uint256 tokenId, uint256 price) external payable {
+    function escrow(address token, uint256 tokenId) external payable {
+        // Confirm msg.sender is owner of token
         address owner = IERC721(token).ownerOf(tokenId);
         if (owner != msg.sender) revert NotAuthorized();
+
+        // Transfer ERC721 to KaliBerger
         IERC721(token).safeTransferFrom(msg.sender, address(this), tokenId);
-        _setPrice(token, tokenId, price);
+
+        // Set creator
         this.setCreator(token, tokenId, owner);
     }
 
@@ -84,7 +90,7 @@ contract KaliBerger is Storage {
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
     /// @param sale Confirm or reject use of Harberger Tax for escrowed ERC721.
-    function approve(address token, uint256 tokenId, bool sale) external payable onlyOperator {
+    function approve(address token, uint256 tokenId, bool sale, string calldata detail) external payable onlyOperator {
         if (IERC721(token).ownerOf(tokenId) != address(this)) revert NotAuthorized();
 
         if (!sale) {
@@ -92,6 +98,9 @@ contract KaliBerger is Storage {
         } else {
             setTokenPurchaseStatus(token, tokenId, sale);
             setTimeLastCollected(token, tokenId, block.timestamp);
+            setTimeAcquired(token, tokenId, block.timestamp);
+            setTokenDetail(token, tokenId, detail);
+            setOwner(token, tokenId, address(this));
         }
     }
 
@@ -119,16 +128,16 @@ contract KaliBerger is Storage {
         address[] memory extensions;
         bytes[] memory extensionsData;
 
-        address[] memory voters;
+        address[] memory voters = new address[](2);
         voters[0] = creator;
         voters[1] = patron;
 
-        uint256[] memory tokens;
-        tokens[1] = this.getPatronContribution(token, tokenId, patron);
-        tokens[0] = tokens[1];
+        uint256[] memory tokens = new uint256[](2);
+        tokens[0] = this.getPatronContribution(token, tokenId, patron);
+        tokens[1] = tokens[0];
 
         uint32[16] memory govSettings;
-        govSettings = [uint32(300), 0, 60, 20, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+        govSettings = [uint32(300), 0, 20, 52, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
 
         uint256 count = this.getBergerCount();
         address payable dao = payable(
@@ -290,8 +299,8 @@ contract KaliBerger is Storage {
         this.setAddress(keccak256(abi.encodePacked("dao.factory")), factory);
     }
 
-    function setImpactDao(address token, uint256 tokenId, address dao) external payable onlyOperator {
-        this.setAddress(keccak256(abi.encode(token, tokenId, ".dao")), dao);
+    function setImpactDao(address token, uint256 tokenId, address impactDao) external payable onlyOperator {
+        this.setAddress(keccak256(abi.encode(token, tokenId, ".impactDao")), impactDao);
     }
 
     function setTax(address token, uint256 tokenId, uint256 _tax) external payable onlyOperator {
@@ -302,12 +311,20 @@ contract KaliBerger is Storage {
         this.setAddress(keccak256(abi.encode(token, tokenId, ".creator")), creator);
     }
 
+    function setTokenDetail(address token, uint256 tokenId, string calldata detail) internal {
+        this.setString(keccak256(abi.encode(token, tokenId, ".detail")), detail);
+    }
+
     function setTokenPurchaseStatus(address token, uint256 tokenId, bool _forSale) internal {
         this.setBool(keccak256(abi.encode(token, tokenId, ".forSale")), _forSale);
     }
 
     function _setPrice(address token, uint256 tokenId, uint256 price) internal {
         this.setUint(keccak256(abi.encode(token, tokenId, ".price")), price);
+    }
+
+    function _addDeposit(address token, uint256 tokenId, uint256 deposit) internal {
+        this.addUint(keccak256(abi.encode(token, tokenId, ".deposit")), deposit);
     }
 
     function setTimeLastCollected(address token, uint256 tokenId, uint256 timestamp) internal {
@@ -344,7 +361,7 @@ contract KaliBerger is Storage {
     }
 
     function getImpactDao(address token, uint256 tokenId) external view returns (address) {
-        return this.getAddress(keccak256(abi.encode(token, tokenId, ".dao")));
+        return this.getAddress(keccak256(abi.encode(token, tokenId, ".impactDao")));
     }
 
     function getTokenStatus(address token, uint256 tokenId) external view returns (bool) {
@@ -362,6 +379,10 @@ contract KaliBerger is Storage {
 
     function getCreator(address token, uint256 tokenId) external view returns (address) {
         return this.getAddress(keccak256(abi.encode(token, tokenId, ".creator")));
+    }
+
+    function getTokenDetail(address token, uint256 tokenId) external view returns (string memory) {
+        return this.getString(keccak256(abi.encode(token, tokenId, ".detail")));
     }
 
     function getDeposit(address token, uint256 tokenId) external view returns (uint256) {
@@ -389,7 +410,7 @@ contract KaliBerger is Storage {
     }
 
     function getOwner(address token, uint256 tokenId) external view returns (address) {
-        return this.getPatron(token, tokenId, this.getPatronCount(token, tokenId));
+        return this.getAddress(keccak256(abi.encode(token, tokenId, ".owner")));
     }
 
     function getPatronCount(address token, uint256 tokenId) external view returns (uint256) {
@@ -453,6 +474,10 @@ contract KaliBerger is Storage {
     /// Delete Logic
     /// -----------------------------------------------------------------------
 
+    function deletePrice(address token, uint256 tokenId) internal {
+        return this.deleteUint(keccak256(abi.encode(token, tokenId, ".price")));
+    }
+
     function deleteDeposit(address token, uint256 tokenId) internal {
         return this.deleteUint(keccak256(abi.encode(token, tokenId, ".deposit")));
     }
@@ -513,7 +538,7 @@ contract KaliBerger is Storage {
         if (_deposit == 0) {
             IERC721(token).safeTransferFrom(IERC721(token).ownerOf(tokenId), address(this), tokenId);
             deleteDeposit(token, tokenId);
-            _setPrice(token, tokenId, 0);
+            deletePrice(token, tokenId);
         }
     }
 
@@ -596,7 +621,7 @@ contract KaliBerger is Storage {
     ) internal {
         // Confirm price.
         uint256 price = this.getPrice(token, tokenId);
-        if (price != currentPrice || newPrice == 0 || msg.value != currentPrice) revert InvalidPurchase();
+        if (price != currentPrice || newPrice == 0 || currentPrice > msg.value) revert InvalidPurchase();
 
         // Add purchase price to patron contribution.
         addPatronContribution(token, tokenId, msg.sender, price);
@@ -604,16 +629,19 @@ contract KaliBerger is Storage {
         // Retrieve deposit, if any.
         uint256 deposit = this.getDeposit(token, tokenId);
 
-        if (currentOwner != address(this)) {
+        if (price + deposit > 0) {
             // this won't execute if KaliBerger owns it. price = 0. deposit = 0.
             // pay previous owner their price + deposit back.
+            if (price + deposit > msg.value) revert InvalidPurchase();
             (bool success,) = currentOwner.call{value: price + deposit}("");
             if (!success) addUnclaimed(currentOwner, price + deposit);
             deleteDeposit(token, tokenId);
         }
 
         // Make deposit, if any.
-        this.addDeposit(token, tokenId, msg.value - price);
+        _addDeposit(token, tokenId, msg.value - price);
+        // (bool _success,) = address(this).call{value: msg.value - price}("");
+        // if (!_success) revert TransferFailed();
     }
 
     /// @notice Interface for any contract that wants to support safeTransfers from ERC721 asset contracts.
