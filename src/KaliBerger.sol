@@ -13,7 +13,9 @@ import {IKaliTokenManager} from "./interface/IKaliTokenManager.sol";
 import {IERC721} from "../lib/forge-std/src/interfaces/IERC721.sol";
 import {IERC20} from "../lib/forge-std/src/interfaces/IERC20.sol";
 
-/// @notice When DAOs use Harberger Tax to sell goods and services and automagically form treasury subDAOs, good things happen!
+/// @notice When DAOs use Harberger Tax to sell goods and services and
+///         automagically form treasury subDAOs, good things happen!
+/// @author audsssy.eth
 contract KaliBerger is Storage {
     /// -----------------------------------------------------------------------
     /// Custom Error
@@ -26,6 +28,7 @@ contract KaliBerger is Storage {
     error NotPatron();
     error NotInitialized();
     error InvalidPurchase();
+    error InvalidClaim();
 
     /// -----------------------------------------------------------------------
     /// Constructor
@@ -34,7 +37,7 @@ contract KaliBerger is Storage {
     function initialize(address dao, address factory) external {
         if (factory != address(0)) {
             init(dao, address(0));
-            setKaliDaoFactory(factory);
+            this.setKaliDaoFactory(factory);
         }
     }
 
@@ -53,10 +56,7 @@ contract KaliBerger is Storage {
     }
 
     modifier initialized() {
-        if (
-            this.getKaliDaoFactory() == address(0) || 
-            this.getDao() == address(0)
-        ) revert NotInitialized();
+        if (this.getKaliDaoFactory() == address(0) || this.getDao() == address(0)) revert NotInitialized();
         _;
     }
 
@@ -72,10 +72,7 @@ contract KaliBerger is Storage {
     /// @notice Escrow ERC721 NFT before making it available for purchase.
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
-    /// @param price Price for ERC721.
     function escrow(address token, uint256 tokenId, uint256 price) external payable {
-        if (price == 0) revert InvalidPrice();
-
         address owner = IERC721(token).ownerOf(tokenId);
         if (owner != msg.sender) revert NotAuthorized();
         IERC721(token).safeTransferFrom(msg.sender, address(this), tokenId);
@@ -91,9 +88,10 @@ contract KaliBerger is Storage {
         if (IERC721(token).ownerOf(tokenId) != address(this)) revert NotAuthorized();
 
         if (!sale) {
-          IERC721(token).safeTransferFrom(address(this), this.getCreator(token, tokenId), tokenId);
+            IERC721(token).safeTransferFrom(address(this), this.getCreator(token, tokenId), tokenId);
         } else {
-          setTokenStatus(token, tokenId, sale);
+            setTokenPurchaseStatus(token, tokenId, sale);
+            setTimeLastCollected(token, tokenId, block.timestamp);
         }
     }
 
@@ -106,7 +104,7 @@ contract KaliBerger is Storage {
     /// @param tokenId ERC721 tokenId.
     function balanceDao(address token, uint256 tokenId) external payable {
         // Get address to DAO to manage revenue from Harberger Tax
-        address payable dao = payable(this.getImpactDao(token, tokenId));
+        address dao = this.getImpactDao(token, tokenId);
         if (dao == address(0)) revert NotAuthorized();
 
         _balance(token, tokenId, dao);
@@ -147,7 +145,7 @@ contract KaliBerger is Storage {
             )
         );
 
-        setImpactDao(token, tokenId, dao);
+        this.setImpactDao(token, tokenId, dao);
         addBergerCount();
         return dao;
     }
@@ -203,6 +201,20 @@ contract KaliBerger is Storage {
     }
 
     /// -----------------------------------------------------------------------
+    /// Unclaimed Logic
+    /// -----------------------------------------------------------------------
+
+    function claim() external payable {
+        uint256 amount = this.getUnclaimed(msg.sender);
+        if (amount == 0) revert InvalidClaim();
+
+        deleteUnclaimed(msg.sender);
+
+        (bool success,) = msg.sender.call{value: amount}("");
+        if (!success) revert TransferFailed();
+    }
+
+    /// -----------------------------------------------------------------------
     /// Patron Logic
     /// -----------------------------------------------------------------------
 
@@ -211,7 +223,7 @@ contract KaliBerger is Storage {
     /// @param tokenId ERC721 tokenId.
     /// @param newPrice New purchase price for ERC721.
     /// @param currentPrice Current purchase price for ERC721.
-    function buyErc(address token, uint256 tokenId, uint256 newPrice, uint256 currentPrice)
+    function buy(address token, uint256 tokenId, uint256 newPrice, uint256 currentPrice)
         external
         payable
         initialized
@@ -274,20 +286,12 @@ contract KaliBerger is Storage {
     /// Setter Logic
     /// -----------------------------------------------------------------------
 
-    function setKaliDaoFactory(address factory) public onlyOperator {
+    function setKaliDaoFactory(address factory) external payable onlyOperator {
         this.setAddress(keccak256(abi.encodePacked("dao.factory")), factory);
     }
 
-    function setImpactDao(address token, uint256 tokenId, address dao) public onlyOperator {
+    function setImpactDao(address token, uint256 tokenId, address dao) external payable onlyOperator {
         this.setAddress(keccak256(abi.encode(token, tokenId, ".dao")), dao);
-    }
-
-    function setTokenStatus(address token, uint256 tokenId, bool _forSale) internal {
-        this.setBool(keccak256(abi.encode(token, tokenId, ".forSale")), _forSale);
-    }
-
-    function _setPrice(address token, uint256 tokenId, uint256 price) internal {
-        this.setUint(keccak256(abi.encode(token, tokenId, ".price")), price);
     }
 
     function setTax(address token, uint256 tokenId, uint256 _tax) external payable onlyOperator {
@@ -298,8 +302,16 @@ contract KaliBerger is Storage {
         this.setAddress(keccak256(abi.encode(token, tokenId, ".creator")), creator);
     }
 
-    function setTimeCollected(address token, uint256 tokenId, uint256 timestamp) internal {
-        this.setUint(keccak256(abi.encode(token, tokenId, ".timeCollected")), timestamp);
+    function setTokenPurchaseStatus(address token, uint256 tokenId, bool _forSale) internal {
+        this.setBool(keccak256(abi.encode(token, tokenId, ".forSale")), _forSale);
+    }
+
+    function _setPrice(address token, uint256 tokenId, uint256 price) internal {
+        this.setUint(keccak256(abi.encode(token, tokenId, ".price")), price);
+    }
+
+    function setTimeLastCollected(address token, uint256 tokenId, uint256 timestamp) internal {
+        this.setUint(keccak256(abi.encode(token, tokenId, ".timeLastCollected")), timestamp);
     }
 
     function setTimeAcquired(address token, uint256 tokenId, uint256 timestamp) internal {
@@ -341,7 +353,7 @@ contract KaliBerger is Storage {
 
     function getTax(address token, uint256 tokenId) external view returns (uint256 _tax) {
         _tax = this.getUint(keccak256(abi.encode(token, tokenId, ".tax")));
-        return (_tax == 0) ? _tax = 50 : _tax; // default tax rate is hardcoded at 50%
+        return (_tax == 0) ? _tax = 50 : _tax; // default tax rate is hardcoded to 50%
     }
 
     function getPrice(address token, uint256 tokenId) external view returns (uint256) {
@@ -356,8 +368,8 @@ contract KaliBerger is Storage {
         return this.getUint(keccak256(abi.encode(token, tokenId, ".deposit")));
     }
 
-    function getTimeCollected(address token, uint256 tokenId) external view returns (uint256) {
-        return this.getUint(keccak256(abi.encode(token, tokenId, ".timeCollected")));
+    function getTimeLastCollected(address token, uint256 tokenId) external view returns (uint256) {
+        return this.getUint(keccak256(abi.encode(token, tokenId, ".timeLastCollected")));
     }
 
     function getTimeAcquired(address token, uint256 tokenId) external view returns (uint256) {
@@ -455,8 +467,8 @@ contract KaliBerger is Storage {
 
     // credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
     function patronageToCollect(address token, uint256 tokenId) external view returns (uint256 amount) {
-        return this.getPrice(token, tokenId) * ((block.timestamp - this.getTimeCollected(token, tokenId)) / 365 days)
-            * (this.getTax(token, tokenId) / 100);
+        return this.getPrice(token, tokenId) * (block.timestamp - this.getTimeLastCollected(token, tokenId))
+            * this.getTax(token, tokenId) / 365 days / 100;
     }
 
     /// -----------------------------------------------------------------------
@@ -487,19 +499,21 @@ contract KaliBerger is Storage {
             // it is still active, but in foreclosure state
             // it is block.timestamp or was in the pas
             // not active and actively foreclosed (price is zero)
-            uint256 timeCollected = this.getTimeCollected(token, tokenId);
-            return timeCollected
-                + (block.timestamp - timeCollected) * this.getDeposit(token, tokenId)
+            uint256 timeLastCollected = this.getTimeLastCollected(token, tokenId);
+            return timeLastCollected
+                + (block.timestamp - timeLastCollected) * this.getDeposit(token, tokenId)
                     / this.patronageToCollect(token, tokenId);
         } else {
             // not active and actively foreclosed (price is zero)
-            return this.getTimeCollected(token, tokenId); // it has been foreclosed or in foreclosure.
+            return this.getTimeLastCollected(token, tokenId); // it has been foreclosed or in foreclosure.
         }
     }
 
     function _forecloseIfNecessary(address token, uint256 tokenId, uint256 _deposit) internal {
         if (_deposit == 0) {
             IERC721(token).safeTransferFrom(IERC721(token).ownerOf(tokenId), address(this), tokenId);
+            deleteDeposit(token, tokenId);
+            _setPrice(token, tokenId, 0);
         }
     }
 
@@ -509,7 +523,7 @@ contract KaliBerger is Storage {
         uint256 toCollect = this.patronageToCollect(token, tokenId);
         uint256 deposit = this.getDeposit(token, tokenId);
 
-        uint256 timeCollected = this.getTimeCollected(token, tokenId);
+        uint256 timeLastCollected = this.getTimeLastCollected(token, tokenId);
 
         if (price != 0) {
             // price > 0 == active owned state
@@ -517,13 +531,20 @@ contract KaliBerger is Storage {
                 // foreclosure happened in the past
                 // up to when was it actually paid for?
                 // TLC + (time_elapsed)*deposit/toCollect
-                setTimeCollected(token, tokenId, (block.timestamp - timeCollected) * deposit / toCollect);
-                toCollect = deposit; // take what's left.
-            } else {
-                setTimeCollected(token, tokenId, block.timestamp);
-            } // normal collection
+                setTimeLastCollected(token, tokenId, (block.timestamp - timeLastCollected) * deposit / toCollect);
 
-            deposit -= toCollect;
+                // Add to unclaimed pool for corresponding dao to claim at later time.
+                addUnclaimed(this.getImpactDao(token, tokenId), deposit);
+
+                // Take deposit.
+                toCollect = deposit;
+            } else {
+                // Normal collection.
+                setTimeLastCollected(token, tokenId, block.timestamp);
+
+                // Add to unclaimed pool for corresponding dao to claim at later time.
+                if (toCollect != 0) addUnclaimed(this.getImpactDao(token, tokenId), toCollect);
+            }
 
             // Add to total amount collected.
             addTotalCollected(token, tokenId, toCollect);
@@ -531,7 +552,8 @@ contract KaliBerger is Storage {
             // Add to amount collected by patron.
             addPatronContribution(token, tokenId, msg.sender, toCollect);
 
-            _forecloseIfNecessary(token, tokenId, deposit);
+            // Foreclose if necessary.
+            _forecloseIfNecessary(token, tokenId, deposit - toCollect);
         }
     }
 
@@ -545,7 +567,7 @@ contract KaliBerger is Storage {
         internal
     {
         // note: it would also tabulate time held in stewardship by smart contract
-        addTimeHeld(currentOwner, this.getTimeCollected(token, tokenId) - this.getTimeAcquired(token, tokenId));
+        addTimeHeld(currentOwner, this.getTimeLastCollected(token, tokenId) - this.getTimeAcquired(token, tokenId));
 
         // Otherwise transfer ownership.
         IERC721(token).safeTransferFrom(currentOwner, newOwner, tokenId);
@@ -563,11 +585,15 @@ contract KaliBerger is Storage {
         setPatronStatus(token, tokenId, newOwner, true);
     }
 
-    /// @notice Internal function to process purchase payment.
+    /// @notice Internal function to pdrocess purchase payment.
     /// credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
-    function processPayment(address token, uint256 tokenId, address currentOwner, uint256 newPrice, uint256 currentPrice)
-        internal
-    {
+    function processPayment(
+        address token,
+        uint256 tokenId,
+        address currentOwner,
+        uint256 newPrice,
+        uint256 currentPrice
+    ) internal {
         // Confirm price.
         uint256 price = this.getPrice(token, tokenId);
         if (price != currentPrice || newPrice == 0 || msg.value != currentPrice) revert InvalidPurchase();
@@ -588,6 +614,12 @@ contract KaliBerger is Storage {
 
         // Make deposit, if any.
         this.addDeposit(token, tokenId, msg.value - price);
+    }
+
+    /// @notice Interface for any contract that wants to support safeTransfers from ERC721 asset contracts.
+    /// credit: z0r0z.eth https://github.com/kalidao/kali-contracts/blob/main/contracts/utils/NFTreceiver.sol
+    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4 sig) {
+        sig = 0x150b7a02; // 'onERC721Received(address,address,uint256,bytes)'
     }
 
     receive() external payable virtual {}

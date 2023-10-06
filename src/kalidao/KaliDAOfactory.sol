@@ -1081,12 +1081,8 @@ contract KaliDAOfactory is Multicall {
 
     address payable private immutable kaliMaster;
 
-    IRicardianLLC private immutable ricardianLLC;
-
-    constructor(address payable kaliMaster_, IRicardianLLC ricardianLLC_) {
+    constructor(address payable kaliMaster_) {
         kaliMaster = kaliMaster_;
-
-        ricardianLLC = ricardianLLC_;
     }
 
     function deployKaliDAO(
@@ -1103,12 +1099,6 @@ contract KaliDAOfactory is Multicall {
         kaliDAO = KaliDAO(_cloneAsMinimalProxy(kaliMaster, name_));
 
         kaliDAO.init(name_, symbol_, docs_, paused_, extensions_, extensionsData_, voters_, shares_, govSettings_);
-
-        bytes memory docs = bytes(docs_);
-
-        if (docs.length == 0) {
-            ricardianLLC.mintLLC{value: msg.value}(address(kaliDAO));
-        }
 
         emit DAOdeployed(
             kaliDAO, name_, symbol_, docs_, paused_, extensions_, extensionsData_, voters_, shares_, govSettings_
