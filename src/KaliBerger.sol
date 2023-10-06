@@ -3,16 +3,17 @@ pragma solidity >=0.8.4;
 
 import {LibString} from "../lib/solbase/src/utils/LibString.sol";
 // import {SafeTransferLib} from "../lib/solbase/src/utils/SafeTransferLib.sol";
+import {IERC721} from "../lib/forge-std/src/interfaces/IERC721.sol";
+import {IERC20} from "../lib/forge-std/src/interfaces/IERC20.sol";
 
 import {IStorage} from "./interface/IStorage.sol";
 import {Storage} from "./Storage.sol";
 
+import {IPatronCertificate} from "./interface/IPatronCertificate.sol";
+
 import {KaliDAOfactory} from "./kalidao/KaliDAOfactory.sol";
 import {KaliDAO} from "./kalidao/KaliDAO.sol";
 import {IKaliTokenManager} from "./interface/IKaliTokenManager.sol";
-
-import {IERC721} from "../lib/forge-std/src/interfaces/IERC721.sol";
-import {IERC20} from "../lib/forge-std/src/interfaces/IERC20.sol";
 
 /// @notice When DAOs use Harberger Tax to sell goods and services and
 ///         automagically form treasury subDAOs, good things happen!
@@ -36,10 +37,11 @@ contract KaliBerger is Storage {
     /// Constructor
     /// -----------------------------------------------------------------------
 
-    function initialize(address dao, address factory) external {
-        if (factory != address(0)) {
+    function initialize(address dao, address daoFactory, address tokenFactory) external {
+        if (daoFactory != address(0)) {
             init(dao, address(0));
-            this.setKaliDaoFactory(factory);
+            this.setKaliDaoFactory(daoFactory);
+            this.setCertificateMinter(tokenFactory);
         }
     }
 
@@ -58,49 +60,77 @@ contract KaliBerger is Storage {
     }
 
     modifier initialized() {
-        if (this.getKaliDaoFactory() == address(0) || this.getDao() == address(0)) revert NotInitialized();
+        if (
+            this.getKaliDaoFactory() == address(0) || this.getDao() == address(0)
+                || this.getCertificateMinter() == address(0)
+        ) revert NotInitialized();
         _;
     }
 
     modifier forSale(address token, uint256 tokenId) {
-        if (!this.getTokenStatus(token, tokenId)) revert NotInitialized();
+        if (!this.getTokenPurchaseStatus(token, tokenId)) revert NotInitialized();
         _;
     }
 
     /// -----------------------------------------------------------------------
-    /// Confirm Sale with Harberger Tax
+    /// Creator Logic
     /// -----------------------------------------------------------------------
 
     /// @notice Escrow ERC721 NFT before making it available for purchase.
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
     function escrow(address token, uint256 tokenId) external payable {
-        // Confirm msg.sender is owner of token
-        address owner = IERC721(token).ownerOf(tokenId);
-        if (owner != msg.sender) revert NotAuthorized();
+        // Confirm msg.sender is creator and owner of token
+        if (IERC721(token).ownerOf(tokenId) != msg.sender) revert NotAuthorized();
 
         // Transfer ERC721 to KaliBerger
         IERC721(token).safeTransferFrom(msg.sender, address(this), tokenId);
 
         // Set creator
-        this.setCreator(token, tokenId, owner);
+        this.setCreator(token, tokenId, msg.sender);
     }
 
+    /// @notice Pull ERC721 NFT from escrow when it is idle.
+    /// @param token ERC721 token address.
+    /// @param tokenId ERC721 tokenId.
+    function pull(address token, uint256 tokenId) external payable {
+        // Confirm msg.sender is creator and owner is address(this)
+        if (
+            this.getCreator(token, tokenId) != msg.sender || IPatronCertificate(token).ownerOf(tokenId) != address(this)
+        ) revert NotAuthorized();
+
+        // Transfer ERC721 back to creator
+        IERC721(token).safeTransferFrom(address(this), msg.sender, tokenId);
+    }
+
+    /// -----------------------------------------------------------------------
+    /// Confirm Sale with Harberger Tax
+    /// -----------------------------------------------------------------------
+
     /// @notice Approve ERC721 NFT for purchase.
+    /// @dev note ERC721 tokenId is downcast to uint96 for minting patron certificates
+    /// @dev note Potential id collision may occur depending on ERC721 tokenId assignment logic
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
     /// @param sale Confirm or reject use of Harberger Tax for escrowed ERC721.
     function approve(address token, uint256 tokenId, bool sale, string calldata detail) external payable onlyOperator {
         if (IERC721(token).ownerOf(tokenId) != address(this)) revert NotAuthorized();
+        address owner = this.getCreator(token, tokenId);
 
         if (!sale) {
-            IERC721(token).safeTransferFrom(address(this), this.getCreator(token, tokenId), tokenId);
+            IERC721(token).safeTransferFrom(address(this), owner, tokenId);
         } else {
-            setTokenPurchaseStatus(token, tokenId, sale);
+            // Mint a certificate as proof of ownership.
+            // Can use to redeem escrowed artwork anytime.
+            address pc = this.getCertificateMinter();
+            IPatronCertificate(pc).mint(owner, IPatronCertificate(pc).getTokenId(token, tokenId));
+
+            // Initialize conditions
             setTimeLastCollected(token, tokenId, block.timestamp);
             setTimeAcquired(token, tokenId, block.timestamp);
-            setTokenDetail(token, tokenId, detail);
             setOwner(token, tokenId, address(this));
+            if (sale) setTokenPurchaseStatus(token, tokenId, sale);
+            if (bytes(detail).length > 0) setTokenDetail(token, tokenId, detail);
         }
     }
 
@@ -159,7 +189,7 @@ contract KaliBerger is Storage {
         return dao;
     }
 
-    /// @notice Update DAO balance when ImpactToken is purchased.
+    /// @notice Update DAO balance when ERC721 is purchased.
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
     /// @param patron Patron of ERC721.
@@ -245,7 +275,7 @@ contract KaliBerger is Storage {
         processPayment(token, tokenId, owner, newPrice, currentPrice);
 
         // Transfer ERC721 NFT and update price, ownership, and patron data.
-        transferNft(token, tokenId, owner, msg.sender, newPrice);
+        transferPatronCertificate(token, tokenId, owner, msg.sender, newPrice);
 
         // Balance DAO according to updated contribution.
         updateBalances(token, tokenId, msg.sender);
@@ -261,8 +291,7 @@ contract KaliBerger is Storage {
         onlyPatron(token, tokenId)
         collectPatronage(token, tokenId)
     {
-        if (price == 0) revert InvalidPrice();
-        this.setUint(keccak256(abi.encode(token, tokenId, ".price")), price);
+        if (price > 0) this.setUint(keccak256(abi.encode(token, tokenId, ".price")), price);
     }
 
     /// @notice To make deposit.
@@ -297,6 +326,10 @@ contract KaliBerger is Storage {
 
     function setKaliDaoFactory(address factory) external payable onlyOperator {
         this.setAddress(keccak256(abi.encodePacked("dao.factory")), factory);
+    }
+
+    function setCertificateMinter(address factory) external payable onlyOperator {
+        this.setAddress(keccak256(abi.encodePacked("certificate.minter")), factory);
     }
 
     function setImpactDao(address token, uint256 tokenId, address impactDao) external payable onlyOperator {
@@ -356,6 +389,10 @@ contract KaliBerger is Storage {
         return this.getAddress(keccak256(abi.encodePacked("dao.factory")));
     }
 
+    function getCertificateMinter() external view returns (address) {
+        return this.getAddress(keccak256(abi.encodePacked("certificate.minter")));
+    }
+
     function getBergerCount() external view returns (uint256) {
         return this.getUint(keccak256(abi.encodePacked("bergerTimes.count")));
     }
@@ -364,7 +401,7 @@ contract KaliBerger is Storage {
         return this.getAddress(keccak256(abi.encode(token, tokenId, ".impactDao")));
     }
 
-    function getTokenStatus(address token, uint256 tokenId) external view returns (bool) {
+    function getTokenPurchaseStatus(address token, uint256 tokenId) external view returns (bool) {
         return this.getBool(keccak256(abi.encode(token, tokenId, ".forSale")));
     }
 
@@ -586,16 +623,26 @@ contract KaliBerger is Storage {
     /// NFT Transfer & Payments Logic
     /// -----------------------------------------------------------------------
 
-    /// @notice Internal function to transfer ImpactToken.
+    /// @notice Internal function to transfer ERC721.
     // credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
-    function transferNft(address token, uint256 tokenId, address currentOwner, address newOwner, uint256 price)
-        internal
-    {
+    function transferPatronCertificate(
+        address token,
+        uint256 tokenId,
+        address currentOwner,
+        address newOwner,
+        uint256 price
+    ) internal {
         // note: it would also tabulate time held in stewardship by smart contract
         addTimeHeld(currentOwner, this.getTimeLastCollected(token, tokenId) - this.getTimeAcquired(token, tokenId));
 
         // Otherwise transfer ownership.
-        IERC721(token).safeTransferFrom(currentOwner, newOwner, tokenId);
+        address minter = this.getCertificateMinter();
+        IPatronCertificate(minter).safeTransferFrom(
+            currentOwner, newOwner, IPatronCertificate(minter).getTokenId(token, tokenId)
+        );
+
+        // Set new owner
+        setOwner(token, tokenId, newOwner);
 
         // Update new price.
         _setPrice(token, tokenId, price);

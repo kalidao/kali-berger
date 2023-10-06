@@ -11,6 +11,7 @@ import {KaliDAOfactory, KaliDAO} from "src/kalidao/KaliDAOfactory.sol";
 import {Storage} from "src/Storage.sol";
 import {IStorage} from "src/interface/IStorage.sol";
 import {KaliBerger} from "src/KaliBerger.sol";
+import {PatronCertificate} from "src/tokens/PatronCertificate.sol";
 
 contract KaliBergerTest is Test {
     MockERC721 erc721;
@@ -20,20 +21,28 @@ contract KaliBergerTest is Test {
 
     Storage stor;
     KaliBerger kaliBerger;
+    PatronCertificate patronCertificate;
 
     IStorage iStorage;
 
     /// @dev Users.
-    address public immutable alice = makeAddr("alice");
-    address public immutable bob = makeAddr("bob");
-    address public immutable charlie = makeAddr("charlie");
-    address public immutable dummy = makeAddr("dummy");
-    address payable public immutable dao = payable(makeAddr("dao"));
+    address public alice = makeAddr("alice");
+    address public bob = makeAddr("bob");
+    address public charlie = makeAddr("charlie");
+    address public dummy = makeAddr("dummy");
+    address payable public dao = payable(makeAddr("dao"));
 
     /// @dev Helpers.
     string internal constant description = "TEST";
     bytes32 internal constant name1 = 0x5445535400000000000000000000000000000000000000000000000000000000;
     bytes32 internal constant name2 = 0x5445535432000000000000000000000000000000000000000000000000000000;
+
+    /// @dev KaliDAO init params
+    address[] extensions;
+    bytes[] extensionsData;
+    address[] voters = [address(alice)];
+    uint256[] shares = [10];
+    uint32[16] govSettings = [uint32(300), 0, 20, 52, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
 
     /// -----------------------------------------------------------------------
     /// Kali Setup Tests
@@ -41,19 +50,26 @@ contract KaliBergerTest is Test {
 
     /// @notice Set up the testing suite.
     function setUp() public payable {
-        // Mint Alice an ERC721
-        erc721 = new MockERC721("TEST", "TEST");
-        erc721.mint(alice, 1);
-        assertEq(erc721.balanceOf(alice), 1);
-
         // Deploy a KaliDAO factory
         daoTemplate = new KaliDAO();
         factory = new KaliDAOfactory(payable(daoTemplate));
+        factory.deployKaliDAO(
+            "Berger Council", "BC", " ", true, extensions, extensionsData, voters, shares, govSettings
+        );
 
         // Deploy contract
         kaliBerger = new KaliBerger();
         vm.prank(dao);
-        kaliBerger.initialize(dao, address(factory));
+        kaliBerger.initialize(dao, address(factory), address(patronCertificate));
+
+        patronCertificate = new PatronCertificate(address(kaliBerger));
+        vm.prank(dao);
+        kaliBerger.setCertificateMinter(address(patronCertificate));
+
+        // Mint Alice an ERC721
+        erc721 = new MockERC721("TEST", "TEST");
+        erc721.mint(alice, 1);
+        assertEq(erc721.balanceOf(alice), 1);
 
         vm.warp(100);
     } // 100
@@ -87,7 +103,7 @@ contract KaliBergerTest is Test {
         vm.warp(500);
 
         // Validate
-        assertEq(kaliBerger.getTokenStatus(address(erc721), 1), true);
+        assertEq(kaliBerger.getTokenPurchaseStatus(address(erc721), 1), true);
         assertEq(kaliBerger.getTokenDetail(address(erc721), 1), "Cool NFT!");
         assertEq(kaliBerger.getOwner(address(erc721), 1), address(kaliBerger));
     } // 500
@@ -118,7 +134,7 @@ contract KaliBergerTest is Test {
         // Validate
         assertEq(erc721.balanceOf(alice), 1);
         assertEq(erc721.balanceOf(address(kaliBerger)), 0);
-        assertEq(kaliBerger.getTokenStatus(address(erc721), 1), false);
+        assertEq(kaliBerger.getTokenPurchaseStatus(address(erc721), 1), false);
     } // 500
 
     /// @notice Primary sale of ERC721
@@ -156,7 +172,7 @@ contract KaliBergerTest is Test {
     function testSecondaryBuy() public payable {
         // Escrow & approve
         testBuy();
-        vm.warp(800);
+        vm.warp(900);
 
         // Deal Charlie ether
         vm.deal(charlie, 10 ether);
@@ -165,10 +181,12 @@ contract KaliBergerTest is Test {
         // Charlie buys
         vm.prank(charlie);
         kaliBerger.buy{value: 1.1 ether}(address(erc721), 1, 1.5 ether, 1 ether);
-        vm.warp(900);
+        vm.warp(1000);
 
         // Validate
+        // TODO: Add more validation checks, including balance at impactDao
         emit log_uint(address(kaliBerger).balance);
+        emit log_uint(address(bob).balance);
     } // 900
 
     function testReceiveETH() public payable {
