@@ -1048,11 +1048,11 @@ contract KaliDAO is KaliDAOtoken, Multicall, NFThelper, ReentrancyGuard {
         }
     }
 
-    function mintShares(address to, uint256 amount) public virtual onlyExtension {
+    function mintTokens(address to, uint256 amount) public virtual onlyExtension {
         _mint(to, amount);
     }
 
-    function burnShares(address from, uint256 amount) public virtual onlyExtension {
+    function burnTokens(address from, uint256 amount) public virtual onlyExtension {
         _burn(from, amount);
     }
 }

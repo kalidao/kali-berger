@@ -12,7 +12,6 @@ import {Storage} from "./Storage.sol";
 import {IPatronCertificate} from "./interface/IPatronCertificate.sol";
 
 import {KaliDAOfactory} from "./kalidao/KaliDAOfactory.sol";
-import {KaliDAO} from "./kalidao/KaliDAO.sol";
 import {IKaliTokenManager} from "./interface/IKaliTokenManager.sol";
 
 /// @notice When DAOs use Harberger Tax to sell goods and services and
@@ -155,8 +154,11 @@ contract KaliBerger is Storage {
     /// @param creator Creator of ERC721.
     /// @param patron Patron of ERC721.
     function summonDao(address token, uint256 tokenId, address creator, address patron) private returns (address) {
-        address[] memory extensions;
-        bytes[] memory extensionsData;
+        address[] memory extensions = new address[](1);
+        extensions[0] = address(this);
+        // address[] memory extensions;
+        bytes[] memory extensionsData = new bytes[](1);
+        extensionsData[0] = "0x0";
 
         address[] memory voters = new address[](2);
         voters[0] = creator;
@@ -199,7 +201,7 @@ contract KaliBerger is Storage {
 
         if (dao == address(0)) {
             // Summon DAO with 50/50 ownership between creator and patron(s).
-            summonDao(token, tokenId, this.getCreator(token, tokenId), patron);
+            this.setImpactDao(token, tokenId, summonDao(token, tokenId, this.getCreator(token, tokenId), patron));
         } else {
             // Update DAO balance.
             _balance(token, tokenId, dao);
@@ -211,13 +213,14 @@ contract KaliBerger is Storage {
     /// @param tokenId ERC721 tokenId.
     /// @param dao ImpactDAO summoned for ERC721.
     function _balance(address token, uint256 tokenId, address dao) private {
-        for (uint256 i = 0; i < this.getPatronCount(token, tokenId);) {
+        uint256 count = this.getPatronCount(token, tokenId);
+        for (uint256 i = 1; i <= count;) {
             // Retrieve patron and patron contribution.
             address _patron = this.getPatron(token, tokenId, i);
             uint256 contribution = this.getPatronContribution(token, tokenId, _patron);
 
             // Retrieve KaliDAO balance data.
-            uint256 _contribution = IERC20(dao).balanceOf(msg.sender);
+            uint256 _contribution = IERC20(dao).balanceOf(_patron);
 
             // Retrieve creator.
             address creator = this.getCreator(token, tokenId);
@@ -476,7 +479,7 @@ contract KaliBerger is Storage {
     }
 
     function getPatronContribution(address token, uint256 tokenId, address patron) external view returns (uint256) {
-        return this.getUint(keccak256(abi.encode(token, tokenId, patron)));
+        return this.getUint(keccak256(abi.encode(token, tokenId, patron, ".contribution")));
     }
 
     /// -----------------------------------------------------------------------
@@ -504,7 +507,7 @@ contract KaliBerger is Storage {
     }
 
     function addPatronContribution(address token, uint256 tokenId, address patron, uint256 amount) internal {
-        this.addUint(keccak256(abi.encode(token, tokenId, patron)), amount);
+        this.addUint(keccak256(abi.encode(token, tokenId, patron, ".contribution")), amount);
     }
 
     /// -----------------------------------------------------------------------
