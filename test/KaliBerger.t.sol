@@ -5,6 +5,7 @@ import "forge-std/Test.sol";
 import "forge-std/console2.sol";
 
 import {IERC721} from "lib/forge-std/src/interfaces/IERC721.sol";
+import {IERC20} from "lib/forge-std/src/interfaces/IERC20.sol";
 import {MockERC721} from "lib/solbase/test/utils/mocks/MockERC721.sol";
 import {KaliDAOfactory, KaliDAO} from "src/kalidao/KaliDAOfactory.sol";
 
@@ -154,6 +155,7 @@ contract KaliBergerTest is Test {
 
         // Validate
         assertEq(address(kaliBerger).balance, 0.1 ether);
+        assertEq(address(bob).balance, 9.9 ether);
     } // 700
 
     /// @notice Calculate patronage to collect after Buy
@@ -166,6 +168,7 @@ contract KaliBergerTest is Test {
             * (block.timestamp - kaliBerger.getTimeLastCollected(address(erc721), 1))
             * kaliBerger.getTax(address(erc721), 1) / 365 days / 100;
         assertEq(kaliBerger.patronageToCollect(address(erc721), 1), amount);
+        emit log_uint(amount);
     }
 
     /// @notice Secondary sale of ERC721
@@ -176,17 +179,25 @@ contract KaliBergerTest is Test {
 
         // Deal Charlie ether
         vm.deal(charlie, 10 ether);
-        // emit log_uint(address(bob).balance);
+        emit log_uint(address(bob).balance);
 
         // Charlie buys
         vm.prank(charlie);
         kaliBerger.buy{value: 1.1 ether}(address(erc721), 1, 1.5 ether, 1 ether);
+        emit log_uint(address(bob).balance);
         vm.warp(1000);
 
         // Validate
-        // TODO: Add more validation checks, including balance at impactDao
-        emit log_uint(address(kaliBerger).balance);
-        emit log_uint(address(bob).balance);
+        emit log_uint(kaliBerger.getPatronContribution(address(erc721), 1, bob));
+        emit log_uint(kaliBerger.getPatronContribution(address(erc721), 1, charlie));
+
+        uint256 alice_balance = IERC20(kaliBerger.getImpactDao(address(erc721), 1)).balanceOf(alice);
+        uint256 bob_balance = IERC20(kaliBerger.getImpactDao(address(erc721), 1)).balanceOf(bob);
+        uint256 charlie_balance = IERC20(kaliBerger.getImpactDao(address(erc721), 1)).balanceOf(charlie);
+        emit log_uint(alice_balance);
+        emit log_uint(bob_balance);
+        emit log_uint(charlie_balance);
+        assertEq(alice_balance, bob_balance + charlie_balance);
     } // 900
 
     function testReceiveETH() public payable {

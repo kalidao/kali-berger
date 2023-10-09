@@ -154,25 +154,29 @@ contract KaliBerger is Storage {
     /// @param creator Creator of ERC721.
     /// @param patron Patron of ERC721.
     function summonDao(address token, uint256 tokenId, address creator, address patron) private returns (address) {
-        address[] memory extensions = new address[](1);
-        extensions[0] = address(this);
-        // address[] memory extensions;
-        bytes[] memory extensionsData = new bytes[](1);
-        extensionsData[0] = "0x0";
-
+        // Provide creator and patron to summon DAO.
         address[] memory voters = new address[](2);
         voters[0] = creator;
         voters[1] = patron;
 
+        // Provide respective token amount.
         uint256[] memory tokens = new uint256[](2);
         tokens[0] = this.getPatronContribution(token, tokenId, patron);
         tokens[1] = tokens[0];
 
+        // Provide KaliBerger as extension.
+        address[] memory extensions = new address[](1);
+        extensions[0] = address(this);
+        bytes[] memory extensionsData = new bytes[](1);
+        extensionsData[0] = "0x0";
+
+        // Provide KaliDAO governance settings
         uint32[16] memory govSettings;
         govSettings = [uint32(300), 0, 20, 52, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
 
+        // Summon a KaliDAO
         uint256 count = this.getBergerCount();
-        address payable dao = payable(
+        address payable impactDao = payable(
             KaliDAOfactory(this.getKaliDaoFactory()).deployKaliDAO(
                 string.concat("BergerTime #", LibString.toString(count)),
                 string.concat("BT #", LibString.toString(count)),
@@ -186,9 +190,12 @@ contract KaliBerger is Storage {
             )
         );
 
-        this.setImpactDao(token, tokenId, dao);
-        addBergerCount();
-        return dao;
+        // Store dao address for future.
+        this.setImpactDao(token, tokenId, impactDao);
+
+        // Increment number of impactDAOs.
+        incrementBergerCount();
+        return impactDao;
     }
 
     /// @notice Update DAO balance when ERC721 is purchased.
@@ -197,14 +204,14 @@ contract KaliBerger is Storage {
     /// @param patron Patron of ERC721.
     function updateBalances(address token, uint256 tokenId, address patron) internal {
         // Get DAO address to manage revenue from Harberger Tax
-        address dao = this.getImpactDao(token, tokenId);
+        address impactDao = this.getImpactDao(token, tokenId);
 
-        if (dao == address(0)) {
+        if (impactDao == address(0)) {
             // Summon DAO with 50/50 ownership between creator and patron(s).
             this.setImpactDao(token, tokenId, summonDao(token, tokenId, this.getCreator(token, tokenId), patron));
         } else {
             // Update DAO balance.
-            _balance(token, tokenId, dao);
+            _balance(token, tokenId, impactDao);
         }
     }
 
@@ -302,7 +309,7 @@ contract KaliBerger is Storage {
     /// @param tokenId ERC721 tokenId.
     /// @param deposit Amount to deposit to pay for tax.
     function addDeposit(address token, uint256 tokenId, uint256 deposit) external payable onlyPatron(token, tokenId) {
-        this.addUint(keccak256(abi.encode(token, tokenId, ".deposit")), deposit);
+        addUint(keccak256(abi.encode(token, tokenId, ".deposit")), deposit);
     }
 
     /// @notice Withdraw from deposit.
@@ -357,10 +364,6 @@ contract KaliBerger is Storage {
 
     function _setPrice(address token, uint256 tokenId, uint256 price) internal {
         this.setUint(keccak256(abi.encode(token, tokenId, ".price")), price);
-    }
-
-    function _addDeposit(address token, uint256 tokenId, uint256 deposit) internal {
-        this.addUint(keccak256(abi.encode(token, tokenId, ".deposit")), deposit);
     }
 
     function setTimeLastCollected(address token, uint256 tokenId, uint256 timestamp) internal {
@@ -486,28 +489,36 @@ contract KaliBerger is Storage {
     /// Add Logic
     /// -----------------------------------------------------------------------
 
-    function addBergerCount() internal {
-        this.addUint(keccak256(abi.encodePacked("bergerTimes.count")), 1);
+    function _addDeposit(address token, uint256 tokenId, uint256 amount) internal {
+        addUint(keccak256(abi.encode(token, tokenId, ".deposit")), amount);
+    }
+
+    function subDeposit(address token, uint256 tokenId, uint256 amount) internal {
+        subUint(keccak256(abi.encode(token, tokenId, ".deposit")), amount);
     }
 
     function addUnclaimed(address user, uint256 amount) internal {
-        this.addUint(keccak256(abi.encode(user, ".unclaimed")), amount);
+        addUint(keccak256(abi.encode(user, ".unclaimed")), amount);
     }
 
     function addTimeHeld(address user, uint256 time) internal {
-        this.addUint(keccak256(abi.encode(user, ".timeHeld")), time);
+        addUint(keccak256(abi.encode(user, ".timeHeld")), time);
     }
 
     function addTotalCollected(address token, uint256 tokenId, uint256 collected) internal {
-        this.addUint(keccak256(abi.encode(token, tokenId, ".totalCollected")), collected);
-    }
-
-    function incrementPatronId(address token, uint256 tokenId) internal {
-        this.addUint(keccak256(abi.encode(token, tokenId, ".patronCount")), 1);
+        addUint(keccak256(abi.encode(token, tokenId, ".totalCollected")), collected);
     }
 
     function addPatronContribution(address token, uint256 tokenId, address patron, uint256 amount) internal {
-        this.addUint(keccak256(abi.encode(token, tokenId, patron, ".contribution")), amount);
+        addUint(keccak256(abi.encode(token, tokenId, patron, ".contribution")), amount);
+    }
+
+    function incrementBergerCount() internal {
+        addUint(keccak256(abi.encodePacked("bergerTimes.count")), 1);
+    }
+
+    function incrementPatronId(address token, uint256 tokenId) internal {
+        addUint(keccak256(abi.encode(token, tokenId, ".patronCount")), 1);
     }
 
     /// -----------------------------------------------------------------------
@@ -515,15 +526,15 @@ contract KaliBerger is Storage {
     /// -----------------------------------------------------------------------
 
     function deletePrice(address token, uint256 tokenId) internal {
-        return this.deleteUint(keccak256(abi.encode(token, tokenId, ".price")));
+        return deleteUint(keccak256(abi.encode(token, tokenId, ".price")));
     }
 
     function deleteDeposit(address token, uint256 tokenId) internal {
-        return this.deleteUint(keccak256(abi.encode(token, tokenId, ".deposit")));
+        return deleteUint(keccak256(abi.encode(token, tokenId, ".deposit")));
     }
 
     function deleteUnclaimed(address user) internal {
-        this.deleteUint(keccak256(abi.encode(user, ".unclaimed")));
+        deleteUint(keccak256(abi.encode(user, ".unclaimed")));
     }
 
     /// -----------------------------------------------------------------------
@@ -598,7 +609,7 @@ contract KaliBerger is Storage {
                 // TLC + (time_elapsed)*deposit/toCollect
                 setTimeLastCollected(token, tokenId, (block.timestamp - timeLastCollected) * deposit / toCollect);
 
-                // Add to unclaimed pool for corresponding dao to claim at later time.
+                // Add to unclaimed pool for corresponding impactDao to claim at later time.
                 addUnclaimed(this.getImpactDao(token, tokenId), deposit);
 
                 // Take deposit.
@@ -607,15 +618,18 @@ contract KaliBerger is Storage {
                 // Normal collection.
                 setTimeLastCollected(token, tokenId, block.timestamp);
 
-                // Add to unclaimed pool for corresponding dao to claim at later time.
-                if (toCollect != 0) addUnclaimed(this.getImpactDao(token, tokenId), toCollect);
+                // Add to unclaimed pool for corresponding impactDao to claim at later time.
+                if (toCollect != 0) {
+                    addUnclaimed(this.getImpactDao(token, tokenId), toCollect);
+                    subDeposit(token, tokenId, toCollect);
+                }
             }
 
             // Add to total amount collected.
             addTotalCollected(token, tokenId, toCollect);
 
             // Add to amount collected by patron.
-            addPatronContribution(token, tokenId, msg.sender, toCollect);
+            addPatronContribution(token, tokenId, this.getOwner(token, tokenId), toCollect);
 
             // Foreclose if necessary.
             _forecloseIfNecessary(token, tokenId, deposit - toCollect);
