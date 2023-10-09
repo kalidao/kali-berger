@@ -5,7 +5,7 @@ pragma solidity >=0.8.4;
 import {IStorage} from "src/interface/IStorage.sol";
 
 /// @notice An extensible DAO-managed storage
-/// @author audsssy.eth 
+/// @author audsssy.eth
 /// credit: inspired by RocketPool (https://github.com/rocket-pool/rocketpool/blob/6a9dbfd85772900bb192aabeb0c9b8d9f6e019d1/contracts/contract/RocketStorage.sol)
 contract Storage {
     /// -----------------------------------------------------------------------
@@ -80,22 +80,22 @@ contract Storage {
     /// -----------------------------------------------------------------------
 
     /// @param _key The key for the record.
-    function deleteAddress(bytes32 _key) external onlyOperator {
+    function deleteAddress(bytes32 _key) internal {
         delete addressStorage[_key];
     }
 
     /// @param _key The key for the record.
-    function deleteUint(bytes32 _key) external onlyOperator {
+    function deleteUint(bytes32 _key) internal {
         delete uintStorage[_key];
     }
 
     /// @param _key The key for the record.
-    function deleteString(bytes32 _key) external onlyOperator {
+    function deleteString(bytes32 _key) internal {
         delete stringStorage[_key];
     }
 
     /// @param _key The key for the record.
-    function deleteBool(bytes32 _key) external onlyOperator {
+    function deleteBool(bytes32 _key) internal {
         delete booleanStorage[_key];
     }
 
@@ -105,13 +105,13 @@ contract Storage {
 
     /// @param _key The key for the record.
     /// @param _amount An amount to add to the record's value
-    function addUint(bytes32 _key, uint256 _amount) external onlyOperator returns (uint256) {
+    function addUint(bytes32 _key, uint256 _amount) internal returns (uint256) {
         return uintStorage[_key] = uintStorage[_key] + _amount;
     }
 
     /// @param _key The key for the record.
     /// @param _amount An amount to subtract from the record's value
-    function subUint(bytes32 _key, uint256 _amount) external onlyOperator returns (uint256) {
+    function subUint(bytes32 _key, uint256 _amount) internal returns (uint256) {
         return uintStorage[_key] = uintStorage[_key] - _amount;
     }
 
