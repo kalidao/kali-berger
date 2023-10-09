@@ -26,7 +26,7 @@ contract KaliBerger is Storage {
     error TransferFailed();
     error InvalidPrice();
     error InvalidExit();
-    error NotPatron();
+    error NotOwner();
     error NotInitialized();
     error InvalidPurchase();
     error InvalidClaim();
@@ -48,21 +48,21 @@ contract KaliBerger is Storage {
     /// Modifiers
     /// -----------------------------------------------------------------------
 
-    modifier onlyPatron(address token, uint256 tokenId) {
-        if (!this.isPatron(token, tokenId, msg.sender)) revert NotPatron();
-        _;
-    }
-
-    modifier collectPatronage(address token, uint256 tokenId) {
-        _collectPatronage(token, tokenId);
-        _;
-    }
-
     modifier initialized() {
         if (
             this.getKaliDaoFactory() == address(0) || this.getDao() == address(0)
                 || this.getCertificateMinter() == address(0)
         ) revert NotInitialized();
+        _;
+    }
+
+    modifier onlyOwner(address token, uint256 tokenId) {
+        if (this.getOwner(token, tokenId) != msg.sender) revert NotOwner();
+        _;
+    }
+
+    modifier collectPatronage(address token, uint256 tokenId) {
+        _collectPatronage(token, tokenId);
         _;
     }
 
@@ -140,12 +140,8 @@ contract KaliBerger is Storage {
     /// @notice Public function to rebalance an Impact DAO.
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
-    function balanceDao(address token, uint256 tokenId) external payable {
-        // Get address to DAO to manage revenue from Harberger Tax
-        address dao = this.getImpactDao(token, tokenId);
-        if (dao == address(0)) revert NotAuthorized();
-
-        _balance(token, tokenId, dao);
+    function balanceDao(address token, uint256 tokenId) external payable collectPatronage(token, tokenId) {
+        _balance(token, tokenId, this.getImpactDao(token, tokenId));
     }
 
     /// @notice Summon an Impact DAO
@@ -298,18 +294,22 @@ contract KaliBerger is Storage {
     function setPrice(address token, uint256 tokenId, uint256 price)
         external
         payable
-        onlyPatron(token, tokenId)
+        onlyOwner(token, tokenId)
         collectPatronage(token, tokenId)
     {
-        if (price > 0) this.setUint(keccak256(abi.encode(token, tokenId, ".price")), price);
+        if (price > 0) _setPrice(token, tokenId, price);
     }
 
     /// @notice To make deposit.
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
-    /// @param deposit Amount to deposit to pay for tax.
-    function addDeposit(address token, uint256 tokenId, uint256 deposit) external payable onlyPatron(token, tokenId) {
-        addUint(keccak256(abi.encode(token, tokenId, ".deposit")), deposit);
+    function addDeposit(address token, uint256 tokenId)
+        external
+        payable
+        onlyOwner(token, tokenId)
+        collectPatronage(token, tokenId)
+    {
+        _addDeposit(token, tokenId, msg.value);
     }
 
     /// @notice Withdraw from deposit.
@@ -319,15 +319,19 @@ contract KaliBerger is Storage {
     function exit(address token, uint256 tokenId, uint256 amount)
         public
         collectPatronage(token, tokenId)
-        onlyPatron(token, tokenId)
+        onlyOwner(token, tokenId)
     {
         uint256 deposit = this.getDeposit(token, tokenId);
-        if (deposit >= amount) revert InvalidExit();
+        uint256 diff = (amount - deposit > 0) ? type(uint256).max : deposit - amount;
 
-        (bool success,) = msg.sender.call{value: deposit - amount}("");
-        if (!success) revert TransferFailed();
+        if (diff != type(uint256).max) {
+            (bool success,) = msg.sender.call{value: diff}("");
+            if (!success) revert TransferFailed();
 
-        _forecloseIfNecessary(token, tokenId, deposit);
+            _forecloseIfNecessary(token, tokenId, diff, amount);
+        } else {
+            revert InvalidExit();
+        }
     }
 
     /// -----------------------------------------------------------------------
@@ -551,45 +555,47 @@ contract KaliBerger is Storage {
     /// Foreclosure Logic
     /// -----------------------------------------------------------------------
 
-    // credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
-    function isForeclosed(address token, uint256 tokenId) external view returns (bool, uint256) {
-        // returns whether it is in foreclosed state or not
-        // depending on whether deposit covers patronage due
-        // useful helper function when price should be zero, but contract doesn't reflect it yet.
-        uint256 toCollect = this.patronageToCollect(token, tokenId);
-        uint256 _deposit = this.getDeposit(token, tokenId);
-        if (toCollect >= _deposit) {
-            return (true, 0);
-        } else {
-            return (false, _deposit - toCollect);
-        }
-    }
+    // // credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
+    // function isForeclosed(address token, uint256 tokenId) external view returns (bool, uint256) {
+    //     // returns whether it is in foreclosed state or not
+    //     // depending on whether deposit covers patronage due
+    //     // useful helper function when price should be zero, but contract doesn't reflect it yet.
+    //     uint256 toCollect = this.patronageToCollect(token, tokenId);
+    //     uint256 _deposit = this.getDeposit(token, tokenId);
+    //     if (toCollect >= _deposit) {
+    //         return (true, 0);
+    //     } else {
+    //         return (false, _deposit - toCollect);
+    //     }
+    // }
 
-    // credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
-    function foreclosureTime(address token, uint256 tokenId) external view returns (uint256) {
-        uint256 pps = this.getPrice(token, tokenId) / 365 days * (this.getTax(token, tokenId) / 100);
-        (, uint256 daw) = this.isForeclosed(token, tokenId);
-        if (daw > 0) {
-            return block.timestamp + daw / pps;
-        } else if (pps > 0) {
-            // it is still active, but in foreclosure state
-            // it is block.timestamp or was in the pas
-            // not active and actively foreclosed (price is zero)
-            uint256 timeLastCollected = this.getTimeLastCollected(token, tokenId);
-            return timeLastCollected
-                + (block.timestamp - timeLastCollected) * this.getDeposit(token, tokenId)
-                    / this.patronageToCollect(token, tokenId);
-        } else {
-            // not active and actively foreclosed (price is zero)
-            return this.getTimeLastCollected(token, tokenId); // it has been foreclosed or in foreclosure.
-        }
-    }
+    // // credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
+    // function foreclosureTime(address token, uint256 tokenId) external view returns (uint256) {
+    //     uint256 pps = this.getPrice(token, tokenId) / 365 days * (this.getTax(token, tokenId) / 100);
+    //     (, uint256 daw) = this.isForeclosed(token, tokenId);
+    //     if (daw > 0) {
+    //         return block.timestamp + daw / pps;
+    //     } else if (pps > 0) {
+    //         // it is still active, but in foreclosure state
+    //         // it is block.timestamp or was in the pas
+    //         // not active and actively foreclosed (price is zero)
+    //         uint256 timeLastCollected = this.getTimeLastCollected(token, tokenId);
+    //         return timeLastCollected
+    //             + (block.timestamp - timeLastCollected) * this.getDeposit(token, tokenId)
+    //                 / this.patronageToCollect(token, tokenId);
+    //     } else {
+    //         // not active and actively foreclosed (price is zero)
+    //         return this.getTimeLastCollected(token, tokenId); // it has been foreclosed or in foreclosure.
+    //     }
+    // }
 
-    function _forecloseIfNecessary(address token, uint256 tokenId, uint256 _deposit) internal {
-        if (_deposit == 0) {
+    function _forecloseIfNecessary(address token, uint256 tokenId, uint256 deposit, uint256 amount) internal {
+        if (deposit == 0 && amount == 0) {
             IERC721(token).safeTransferFrom(IERC721(token).ownerOf(tokenId), address(this), tokenId);
             deleteDeposit(token, tokenId);
             deletePrice(token, tokenId);
+        } else {
+            subDeposit(token, tokenId, amount);
         }
     }
 
@@ -632,7 +638,7 @@ contract KaliBerger is Storage {
             addPatronContribution(token, tokenId, this.getOwner(token, tokenId), toCollect);
 
             // Foreclose if necessary.
-            _forecloseIfNecessary(token, tokenId, deposit - toCollect);
+            _forecloseIfNecessary(token, tokenId, deposit - toCollect, 0);
         }
     }
 
