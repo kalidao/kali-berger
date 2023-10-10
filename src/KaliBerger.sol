@@ -36,11 +36,11 @@ contract KaliBerger is Storage {
     /// Constructor
     /// -----------------------------------------------------------------------
 
-    function initialize(address dao, address daoFactory, address tokenFactory) external {
+    function initialize(address dao, address daoFactory, address minter) external {
         if (daoFactory != address(0)) {
             init(dao, address(0));
             this.setKaliDaoFactory(daoFactory);
-            this.setCertificateMinter(tokenFactory);
+            this.setCertificateMinter(minter);
         }
     }
 
@@ -92,18 +92,20 @@ contract KaliBerger is Storage {
     /// @notice Pull ERC721 NFT from escrow when it is idle.
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
-    function pull(address token, uint256 tokenId) external payable {
-        // Confirm msg.sender is creator and owner is address(this)
-        if (
-            this.getCreator(token, tokenId) != msg.sender || IPatronCertificate(token).ownerOf(tokenId) != address(this)
-        ) revert NotAuthorized();
+    function pull(address token, uint256 tokenId) external payable collectPatronage(token, tokenId) {
+        address minter = this.getCertificateMinter();
+        uint256 id = IPatronCertificate(minter).getTokenId(token, tokenId);
+
+        // Confirm msg.sender is creator and owner of certificate is address(this)
+        if (this.getCreator(token, tokenId) != msg.sender) revert NotAuthorized();
+        if (IPatronCertificate(minter).ownerOf(id) != address(this)) revert InvalidExit();
 
         // Transfer ERC721 back to creator
         IERC721(token).safeTransferFrom(address(this), msg.sender, tokenId);
     }
 
     /// -----------------------------------------------------------------------
-    /// Confirm Sale with Harberger Tax
+    /// DAO Logic
     /// -----------------------------------------------------------------------
 
     /// @notice Approve ERC721 NFT for purchase.
@@ -136,13 +138,6 @@ contract KaliBerger is Storage {
     /// -----------------------------------------------------------------------
     /// ImpactDAO memberships
     /// -----------------------------------------------------------------------
-
-    /// @notice Public function to rebalance an Impact DAO.
-    /// @param token ERC721 token address.
-    /// @param tokenId ERC721 tokenId.
-    function balanceDao(address token, uint256 tokenId) external payable collectPatronage(token, tokenId) {
-        _balance(token, tokenId, this.getImpactDao(token, tokenId));
-    }
 
     /// @notice Summon an Impact DAO
     /// @param token ERC721 token address.
@@ -194,14 +189,11 @@ contract KaliBerger is Storage {
         return impactDao;
     }
 
-    /// @notice Update DAO balance when ERC721 is purchased.
+    /// @notice Update Impact DAO balance when ERC721 is purchased.
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
     /// @param patron Patron of ERC721.
-    function updateBalances(address token, uint256 tokenId, address patron) internal {
-        // Get DAO address to manage revenue from Harberger Tax
-        address impactDao = this.getImpactDao(token, tokenId);
-
+    function updateBalances(address token, uint256 tokenId, address impactDao, address patron) internal {
         if (impactDao == address(0)) {
             // Summon DAO with 50/50 ownership between creator and patron(s).
             this.setImpactDao(token, tokenId, summonDao(token, tokenId, this.getCreator(token, tokenId), patron));
@@ -209,6 +201,13 @@ contract KaliBerger is Storage {
             // Update DAO balance.
             _balance(token, tokenId, impactDao);
         }
+    }
+
+    /// @notice Public function to rebalance any Impact DAO.
+    /// @param token ERC721 token address.
+    /// @param tokenId ERC721 tokenId.
+    function balanceDao(address token, uint256 tokenId) external payable collectPatronage(token, tokenId) {
+        _balance(token, tokenId, this.getImpactDao(token, tokenId));
     }
 
     /// @notice Rebalance Impact DAO.
@@ -228,15 +227,13 @@ contract KaliBerger is Storage {
             // Retrieve creator.
             address creator = this.getCreator(token, tokenId);
 
-            if (contribution != _contribution) {
-                // Determine to mint or burn.
-                if (contribution > _contribution) {
-                    IKaliTokenManager(dao).mintTokens(creator, contribution - _contribution);
-                    IKaliTokenManager(dao).mintTokens(_patron, contribution - _contribution);
-                } else if (contribution < _contribution) {
-                    IKaliTokenManager(dao).burnTokens(creator, _contribution - contribution);
-                    IKaliTokenManager(dao).burnTokens(_patron, _contribution - contribution);
-                }
+            // Determine to mint or burn.
+            if (contribution > _contribution) {
+                IKaliTokenManager(dao).mintTokens(creator, contribution - _contribution);
+                IKaliTokenManager(dao).mintTokens(_patron, contribution - _contribution);
+            } else {
+                IKaliTokenManager(dao).burnTokens(creator, _contribution - contribution);
+                IKaliTokenManager(dao).burnTokens(_patron, _contribution - contribution);
             }
 
             unchecked {
@@ -284,7 +281,7 @@ contract KaliBerger is Storage {
         transferPatronCertificate(token, tokenId, owner, msg.sender, newPrice);
 
         // Balance DAO according to updated contribution.
-        updateBalances(token, tokenId, msg.sender);
+        updateBalances(token, tokenId, this.getImpactDao(token, tokenId), msg.sender);
     }
 
     /// @notice Set new price for purchase.
@@ -321,14 +318,11 @@ contract KaliBerger is Storage {
         collectPatronage(token, tokenId)
         onlyOwner(token, tokenId)
     {
-        uint256 deposit = this.getDeposit(token, tokenId);
-        uint256 diff = (deposit >= amount) ? deposit - amount : type(uint256).max;
-
-        if (diff != type(uint256).max) {
+        if (this.getDeposit(token, tokenId) >= amount) {
             (bool success,) = msg.sender.call{value: amount}("");
             if (!success) revert TransferFailed();
 
-            _forecloseIfNecessary(token, tokenId, diff, amount);
+            subDeposit(token, tokenId, amount);
         } else {
             revert InvalidExit();
         }
@@ -541,6 +535,10 @@ contract KaliBerger is Storage {
         deleteUint(keccak256(abi.encode(user, ".unclaimed")));
     }
 
+    function deleteTokenPurchaseStatus(address token, uint256 tokenId) internal {
+        return deleteBool(keccak256(abi.encode(token, tokenId, ".forSale")));
+    }
+
     /// -----------------------------------------------------------------------
     /// Collection Logic
     /// -----------------------------------------------------------------------
@@ -589,37 +587,34 @@ contract KaliBerger is Storage {
     //     }
     // }
 
-    function _forecloseIfNecessary(address token, uint256 tokenId, uint256 diff, uint256 amount) internal {
-        if (diff == 0 && amount == 0) {
-            IERC721(token).safeTransferFrom(IERC721(token).ownerOf(tokenId), address(this), tokenId);
-            deleteDeposit(token, tokenId);
-            deletePrice(token, tokenId);
-        } else {
-            subDeposit(token, tokenId, amount);
-        }
-    }
-
     // credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
     function _collectPatronage(address token, uint256 tokenId) internal {
         uint256 price = this.getPrice(token, tokenId);
         uint256 toCollect = this.patronageToCollect(token, tokenId);
         uint256 deposit = this.getDeposit(token, tokenId);
-
         uint256 timeLastCollected = this.getTimeLastCollected(token, tokenId);
 
         if (price != 0) {
             // price > 0 == active owned state
-            if (toCollect >= deposit) {
-                // foreclosure happened in the past
-                // up to when was it actually paid for?
-                // TLC + (time_elapsed)*deposit/toCollect
-                setTimeLastCollected(token, tokenId, (block.timestamp - timeLastCollected) * deposit / toCollect);
+            if (toCollect > deposit) {
+                if (deposit > 0) {
+                    // foreclosure happened in the past
+                    // up to when was it actually paid for?
+                    // TLC + (time_elapsed)*deposit/toCollect
+                    setTimeLastCollected(token, tokenId, (block.timestamp - timeLastCollected) * deposit / toCollect);
 
-                // Add to unclaimed pool for corresponding impactDao to claim at later time.
-                addUnclaimed(this.getImpactDao(token, tokenId), deposit);
+                    // Add to unclaimed pool for corresponding impactDao to claim at later time.
+                    addUnclaimed(this.getImpactDao(token, tokenId), deposit);
 
-                // Take deposit.
-                toCollect = deposit;
+                    // Add to total amount collected.
+                    addTotalCollected(token, tokenId, deposit);
+
+                    // Add to amount collected by patron.
+                    addPatronContribution(token, tokenId, this.getOwner(token, tokenId), deposit);
+                }
+
+                // Foreclose.
+                _foreclose(token, tokenId);
             } else {
                 // Normal collection.
                 setTimeLastCollected(token, tokenId, block.timestamp);
@@ -629,17 +624,20 @@ contract KaliBerger is Storage {
                     addUnclaimed(this.getImpactDao(token, tokenId), toCollect);
                     subDeposit(token, tokenId, toCollect);
                 }
+
+                // Add to total amount collected.
+                addTotalCollected(token, tokenId, toCollect);
+
+                // Add to amount collected by patron.
+                addPatronContribution(token, tokenId, this.getOwner(token, tokenId), toCollect);
             }
-
-            // Add to total amount collected.
-            addTotalCollected(token, tokenId, toCollect);
-
-            // Add to amount collected by patron.
-            addPatronContribution(token, tokenId, this.getOwner(token, tokenId), toCollect);
-
-            // Foreclose if necessary.
-            _forecloseIfNecessary(token, tokenId, deposit - toCollect, 0);
         }
+    }
+
+    function _foreclose(address token, uint256 tokenId) internal {
+        transferPatronCertificate(token, tokenId, address(0), address(this), 0);
+        deleteDeposit(token, tokenId);
+        deleteTokenPurchaseStatus(token, tokenId);
     }
 
     /// -----------------------------------------------------------------------
@@ -655,14 +653,18 @@ contract KaliBerger is Storage {
         address newOwner,
         uint256 price
     ) internal {
+        address minter = this.getCertificateMinter();
+        uint256 _tokenId = IPatronCertificate(minter).getTokenId(token, tokenId);
+
+        if (currentOwner == address(0)) {
+            currentOwner = IPatronCertificate(minter).ownerOf(_tokenId);
+        }
+
         // note: it would also tabulate time held in stewardship by smart contract
         addTimeHeld(currentOwner, this.getTimeLastCollected(token, tokenId) - this.getTimeAcquired(token, tokenId));
 
         // Otherwise transfer ownership.
-        address minter = this.getCertificateMinter();
-        IPatronCertificate(minter).safeTransferFrom(
-            currentOwner, newOwner, IPatronCertificate(minter).getTokenId(token, tokenId)
-        );
+        IPatronCertificate(minter).safeTransferFrom(currentOwner, newOwner, _tokenId);
 
         // Set new owner
         setOwner(token, tokenId, newOwner);
@@ -702,7 +704,6 @@ contract KaliBerger is Storage {
         if (price + deposit > 0) {
             // this won't execute if KaliBerger owns it. price = 0. deposit = 0.
             // pay previous owner their price + deposit back.
-            if (price + deposit > msg.value) revert InvalidPurchase();
             (bool success,) = currentOwner.call{value: price + deposit}("");
             if (!success) addUnclaimed(currentOwner, price + deposit);
             deleteDeposit(token, tokenId);
