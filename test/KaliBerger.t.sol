@@ -289,22 +289,50 @@ contract KaliBergerTest is Test {
         vm.warp(4500);
 
         uint256 _deposit = kaliBerger.getDeposit(address(token_1), 1);
+        // emit log_uint(_deposit);
+        uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
+        // emit log_uint(patronage);
 
         // Bob exits a portion of deposit.
         vm.prank(bob);
         kaliBerger.exit(address(token_1), 1, 0.3 ether);
 
         // Validate deposit amount
-        assertEq(
-            kaliBerger.getDeposit(address(token_1), 1),
-            _deposit - 0.3 ether - kaliBerger.patronageToCollect(address(token_1), 1)
-        );
+        assertEq(kaliBerger.getDeposit(address(token_1), 1), _deposit - 0.3 ether - patronage);
         validatePatronageToCollect(token_1, 1);
     } // timestamp: 4500
 
     /// @notice Bob ragequits by removing all of his deposit, triggering foreclosure.
     function testBuy_ragequit() public payable {
         testBuy_addDeposit();
+
+        vm.warp(5000);
+
+        uint256 _deposit = kaliBerger.getDeposit(address(token_1), 1);
+        // emit log_uint(_deposit);
+        uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
+        // emit log_uint(patronage);
+
+        // Bob withdraws all of deposit.
+        vm.prank(bob);
+        kaliBerger.exit(address(token_1), 1, _deposit - patronage);
+
+        // Validate
+        assertEq(kaliBerger.getDeposit(address(token_1), 1), 0);
+        assertEq(token_1.balanceOf(address(kaliBerger)), 1);
+        validatePatronageToCollect(token_1, 1);
+    }
+
+    /// @notice Bob withdraws too much and triggers InvalidExit() error.
+    function testBuy_invalidExit() public payable {
+        testBuy_addDeposit();
+
+        vm.warp(5000);
+
+        // InvalidExit()
+        vm.expectRevert(KaliBerger.InvalidExit.selector);
+        vm.prank(bob);
+        kaliBerger.exit(address(token_1), 1, 1 ether);
     }
 
     /// @notice Charlie buys token_1, tokenId #1 and announces new price for sale.

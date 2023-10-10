@@ -322,10 +322,10 @@ contract KaliBerger is Storage {
         onlyOwner(token, tokenId)
     {
         uint256 deposit = this.getDeposit(token, tokenId);
-        uint256 diff = (amount - deposit > 0) ? type(uint256).max : deposit - amount;
+        uint256 diff = (deposit >= amount) ? deposit - amount : type(uint256).max;
 
         if (diff != type(uint256).max) {
-            (bool success,) = msg.sender.call{value: diff}("");
+            (bool success,) = msg.sender.call{value: amount}("");
             if (!success) revert TransferFailed();
 
             _forecloseIfNecessary(token, tokenId, diff, amount);
@@ -589,8 +589,8 @@ contract KaliBerger is Storage {
     //     }
     // }
 
-    function _forecloseIfNecessary(address token, uint256 tokenId, uint256 deposit, uint256 amount) internal {
-        if (deposit == 0 && amount == 0) {
+    function _forecloseIfNecessary(address token, uint256 tokenId, uint256 diff, uint256 amount) internal {
+        if (diff == 0 && amount == 0) {
             IERC721(token).safeTransferFrom(IERC721(token).ownerOf(tokenId), address(this), tokenId);
             deleteDeposit(token, tokenId);
             deletePrice(token, tokenId);
