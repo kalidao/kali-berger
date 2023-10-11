@@ -131,7 +131,7 @@ contract KaliBerger is Storage {
             setTimeAcquired(token, tokenId, block.timestamp);
             setOwner(token, tokenId, address(this));
             if (sale) setTokenPurchaseStatus(token, tokenId, sale);
-            if (bytes(detail).length > 0) setTokenDetail(token, tokenId, detail);
+            if (bytes(detail).length > 0) _setTokenDetail(token, tokenId, detail);
         }
     }
 
@@ -352,7 +352,11 @@ contract KaliBerger is Storage {
         this.setAddress(keccak256(abi.encode(token, tokenId, ".creator")), creator);
     }
 
-    function setTokenDetail(address token, uint256 tokenId, string calldata detail) internal {
+    function setTokenDetail(address token, uint256 tokenId, string calldata detail) external payable onlyOperator {
+        this.setString(keccak256(abi.encode(token, tokenId, ".detail")), detail);
+    }
+
+    function _setTokenDetail(address token, uint256 tokenId, string calldata detail) internal {
         this.setString(keccak256(abi.encode(token, tokenId, ".detail")), detail);
     }
 
@@ -411,7 +415,7 @@ contract KaliBerger is Storage {
 
     function getTax(address token, uint256 tokenId) external view returns (uint256 _tax) {
         _tax = this.getUint(keccak256(abi.encode(token, tokenId, ".tax")));
-        return (_tax == 0) ? _tax = 50 : _tax; // default tax rate is hardcoded to 50%
+        return (_tax == 0) ? _tax = 10 : _tax; // default tax rate is hardcoded to 10%
     }
 
     function getPrice(address token, uint256 tokenId) external view returns (uint256) {
