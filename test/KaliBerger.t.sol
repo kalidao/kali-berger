@@ -246,87 +246,128 @@ contract KaliBergerTest is Test {
         kaliBerger.buy{value: 0.1 ether}(address(token_1), 1, 1 ether, 0);
         vm.warp(3100);
 
-        // Validate
+        // Validate.
         assertEq(address(kaliBerger).balance, 0.1 ether);
         assertEq(address(bob).balance, 9.9 ether);
         assertEq(kaliBerger.getBergerCount(), 1);
         validatePatronageToCollect(token_1, 1);
 
+        // Balance DAO.
         balanceDao(4000, address(token_1), 1, alfred);
     } // timestamp: 4000
 
     /// @notice Unsatisfied with the first price, Bob sets a new price.
     function testBuy_setPrice() public payable {
-        // Bob buys
+        // Bob buys.
         testBuy();
+        vm.warp(4500);
 
-        // Bob sets new price
+        // Retrieve data for validation.
+        address impactDao = kaliBerger.getImpactDao(address(token_1), 1);
+        uint256 oldBalance = address(kaliBerger).balance;
+        uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
+        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
+
+        // Bob sets new price.
         vm.prank(bob);
         kaliBerger.setPrice(address(token_1), 1, 2 ether);
 
-        // Validate
-        vm.warp(4500);
+        // Validate setting of new price.
         assertEq(kaliBerger.getPrice(address(token_1), 1), 2 ether);
+
+        // Validate balances.
+        vm.prank(impactDao);
+        kaliBerger.claim();
+        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
+        assertEq(address(kaliBerger).balance, oldBalance - address(impactDao).balance);
+
+        // Validate patronage.
+        vm.warp(5000);
         validatePatronageToCollect(token_1, 1);
-    }
+    } // timestamp: 5000
 
     /// @notice Bob add deposits to maintain his ownership of token_1, token #1 for a longer period of time.
     function testBuy_addDeposit() public payable {
-        // Bob buys
+        // Bob buys.
         testBuy();
+        vm.warp(4500);
 
-        uint256 _deposit = kaliBerger.getDeposit(address(token_1), 1);
+        // Retrieve data for validation.
+        address impactDao = kaliBerger.getImpactDao(address(token_1), 1);
+        uint256 deposit = kaliBerger.getDeposit(address(token_1), 1);
+        uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
+        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
 
-        // Bob adds deposit
+        // Bob adds deposit.
         vm.prank(bob);
         kaliBerger.addDeposit{value: 0.5 ether}(address(token_1), 1);
 
-        // Validate deposit amount
-        assertEq(
-            kaliBerger.getDeposit(address(token_1), 1),
-            _deposit + 0.5 ether - kaliBerger.patronageToCollect(address(token_1), 1)
-        );
+        // Retrieve data for validation.
+        uint256 oldBalance = address(kaliBerger).balance;
+
+        // Validate deposit amount.
+        assertEq(kaliBerger.getDeposit(address(token_1), 1), deposit + 0.5 ether - patronage);
         validatePatronageToCollect(token_1, 1);
-    } // timestamp: 4000
+
+        // Validate balances.
+        vm.prank(impactDao);
+        kaliBerger.claim();
+        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
+        assertEq(address(kaliBerger).balance, oldBalance - address(impactDao).balance);
+    } // timestamp: 4500
 
     /// @notice Bob exits a portion of his previous deposit.
     function testBuy_exit() public payable {
         testBuy_addDeposit();
-        vm.warp(4500);
+        vm.warp(6000);
 
-        uint256 _deposit = kaliBerger.getDeposit(address(token_1), 1);
-        // emit log_uint(_deposit);
+        // Retrieve data for validation.
+        address impactDao = kaliBerger.getImpactDao(address(token_1), 1);
         uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
-        // emit log_uint(patronage);
+        uint256 deposit = kaliBerger.getDeposit(address(token_1), 1);
+        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
+        uint256 oldBalance = address(kaliBerger).balance;
 
         // Bob exits a portion of deposit.
         vm.prank(bob);
         kaliBerger.exit(address(token_1), 1, 0.3 ether);
 
         // Validate deposit amount
-        assertEq(kaliBerger.getDeposit(address(token_1), 1), _deposit - 0.3 ether - patronage);
+        assertEq(kaliBerger.getDeposit(address(token_1), 1), deposit - 0.3 ether - patronage);
         validatePatronageToCollect(token_1, 1);
-    } // timestamp: 4500
+
+        // Retrieve data for validation.
+        uint256 unclaimed = kaliBerger.getUnclaimed(impactDao);
+
+        vm.prank(impactDao);
+        kaliBerger.claim();
+        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
+        emit log_uint(address(kaliBerger).balance);
+        assertEq(address(kaliBerger).balance, oldBalance - 0.3 ether - unclaimed);
+    } // timestamp: 6000
 
     /// @notice Bob ragequits by removing all of his deposit, triggering foreclosure.
     function testBuy_ragequit() public payable {
         testBuy_addDeposit();
+        vm.warp(6000);
 
-        vm.warp(5000);
-
-        uint256 _deposit = kaliBerger.getDeposit(address(token_1), 1);
-        // emit log_uint(_deposit);
+        // Retrieve data for validation.
+        address impactDao = kaliBerger.getImpactDao(address(token_1), 1);
         uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
-        // emit log_uint(patronage);
+        uint256 deposit = kaliBerger.getDeposit(address(token_1), 1);
+        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
+        uint256 oldBalance = address(kaliBerger).balance;
 
         // Bob withdraws all of deposit.
         vm.prank(bob);
-        kaliBerger.exit(address(token_1), 1, _deposit - patronage);
+        kaliBerger.exit(address(token_1), 1, deposit - patronage);
 
         // Validate
         assertEq(kaliBerger.getDeposit(address(token_1), 1), 0);
         assertEq(token_1.balanceOf(address(kaliBerger)), 1);
         validatePatronageToCollect(token_1, 1);
+        // TODO: Validate KaliBerger balance
+        // assertEq(address(kaliBerger).balance, 0.1 ether);
     }
 
     /// @notice Bob withdraws too much and triggers InvalidExit() error.
@@ -357,6 +398,8 @@ contract KaliBergerTest is Test {
 
         // Validate
         balanceDao(5500, address(token_1), 1, alfred);
+        // TODO: Validate KaliBerger balance
+        // assertEq(address(kaliBerger).balance, 0.1 ether);
     } // timestamp: 5500
 
     /// @notice Alfred tries to withdraw token_1, tokenId #1 but cannot bc it has not
@@ -391,6 +434,8 @@ contract KaliBergerTest is Test {
 
         // Validate.
         balanceDao(200000, address(token_1), 1, alfred);
+        // TODO: Validate KaliBerger balance
+        // assertEq(address(kaliBerger).balance, 0.1 ether);
     } // timestamp: 200000
 
     /// @notice Alfred withdraws token_1, tokenId #1.
@@ -411,6 +456,9 @@ contract KaliBergerTest is Test {
         assertEq(kaliBerger.getDeposit(address(token_1), 1), 0);
         assertEq(kaliBerger.getTokenPurchaseStatus(address(token_1), 1), false);
         balanceDao(timestamp, address(token_1), 1, alfred);
+
+        // TODO: Validate KaliBerger balance
+        // assertEq(address(kaliBerger).balance, 0.1 ether);
     } // timestamp: 10000000
 
     // TODO: Add claim test
