@@ -339,10 +339,10 @@ contract KaliBergerTest is Test {
         // Retrieve data for validation.
         uint256 unclaimed = kaliBerger.getUnclaimed(impactDao);
 
+        // Validate balances.
         vm.prank(impactDao);
         kaliBerger.claim();
         assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
-        emit log_uint(address(kaliBerger).balance);
         assertEq(address(kaliBerger).balance, oldBalance - 0.3 ether - unclaimed);
     } // timestamp: 6000
 
@@ -362,12 +362,19 @@ contract KaliBergerTest is Test {
         vm.prank(bob);
         kaliBerger.exit(address(token_1), 1, deposit - patronage);
 
-        // Validate
+        // Validate token
         assertEq(kaliBerger.getDeposit(address(token_1), 1), 0);
         assertEq(token_1.balanceOf(address(kaliBerger)), 1);
         validatePatronageToCollect(token_1, 1);
-        // TODO: Validate KaliBerger balance
-        // assertEq(address(kaliBerger).balance, 0.1 ether);
+
+        // Validate balances.
+        vm.prank(impactDao);
+        kaliBerger.claim();
+        // emit log_uint(unclaimed);
+        // emit log_uint(address(impactDao).balance);
+        // emit log_uint(address(kaliBerger).balance);
+        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
+        assertEq(address(kaliBerger).balance, 0);
     }
 
     /// @notice Bob withdraws too much and triggers InvalidExit() error.
