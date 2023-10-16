@@ -139,6 +139,13 @@ contract KaliBerger is Storage {
     /// ImpactDAO memberships
     /// -----------------------------------------------------------------------
 
+    /// @notice Public function to rebalance any Impact DAO.
+    /// @param token ERC721 token address.
+    /// @param tokenId ERC721 tokenId.
+    function balanceDao(address token, uint256 tokenId) external payable collectPatronage(token, tokenId) {
+        _balance(token, tokenId, this.getImpactDao(token, tokenId));
+    }
+
     /// @notice Summon an Impact DAO
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
@@ -203,13 +210,6 @@ contract KaliBerger is Storage {
         }
     }
 
-    /// @notice Public function to rebalance any Impact DAO.
-    /// @param token ERC721 token address.
-    /// @param tokenId ERC721 tokenId.
-    function balanceDao(address token, uint256 tokenId) external payable collectPatronage(token, tokenId) {
-        _balance(token, tokenId, this.getImpactDao(token, tokenId));
-    }
-
     /// @notice Rebalance Impact DAO.
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
@@ -260,7 +260,7 @@ contract KaliBerger is Storage {
     /// Patron Logic
     /// -----------------------------------------------------------------------
 
-    /// @notice Buy ERC721 NFT.
+    /// @notice Buy Patron Certificate.
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
     /// @param newPrice New purchase price for ERC721.
@@ -297,7 +297,7 @@ contract KaliBerger is Storage {
         if (price > 0) _setPrice(token, tokenId, price);
     }
 
-    /// @notice To make deposit.
+    /// @notice Make a deposit.
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
     function addDeposit(address token, uint256 tokenId)
@@ -659,13 +659,19 @@ contract KaliBerger is Storage {
     ) internal {
         address minter = this.getCertificateMinter();
         uint256 _tokenId = IPatronCertificate(minter).getTokenId(token, tokenId);
+        uint256 timeAcquired = this.getTimeAcquired(token, tokenId);
+        uint256 timeLastCollected = this.getTimeLastCollected(token, tokenId);
 
         if (currentOwner == address(0)) {
+            // Foreclose.
             currentOwner = IPatronCertificate(minter).ownerOf(_tokenId);
         }
 
-        // note: it would also tabulate time held in stewardship by smart contract
-        addTimeHeld(currentOwner, this.getTimeLastCollected(token, tokenId) - this.getTimeAcquired(token, tokenId));
+        // Calculate absolute time held by current owner, including KaliBerger.
+        addTimeHeld(
+            currentOwner,
+            (timeLastCollected > timeAcquired) ? timeLastCollected - timeAcquired : timeAcquired - timeLastCollected
+        );
 
         // Otherwise transfer ownership.
         IPatronCertificate(minter).safeTransferFrom(currentOwner, newOwner, _tokenId);
