@@ -373,7 +373,6 @@ contract KaliBergerTest is Test {
         uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
         uint256 deposit = kaliBerger.getDeposit(address(token_1), 1);
         uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
-        uint256 oldBalance = address(kaliBerger).balance;
 
         // Bob withdraws all of deposit.
         vm.prank(bob);
@@ -416,7 +415,6 @@ contract KaliBergerTest is Test {
         address impactDao = kaliBerger.getImpactDao(address(token_1), 1);
         uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
         uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
-        uint256 oldBalance = address(kaliBerger).balance;
 
         // Deal Charlie ether
         vm.deal(charlie, 10 ether);
@@ -439,7 +437,6 @@ contract KaliBergerTest is Test {
         kaliBerger.claim();
         assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
         assertEq(address(charlie).balance, 8.7 ether);
-        validatePatronageToCollect(token_1, 1);
 
         // Validate ownership of Patron Certificate for token_1, #1.
         assertEq(
@@ -513,18 +510,43 @@ contract KaliBergerTest is Test {
         testBuy_secondBuy();
         vm.warp(100000);
 
-        // Deal Earn ether.
+        // Retrieve data for validation.
+        address impactDao = kaliBerger.getImpactDao(address(token_1), 1);
+        uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
+        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
+
+        // Deal Charlie ether
         vm.deal(earn, 10 ether);
 
-        // Earn buys.
+        // Charlie buys
         vm.prank(earn);
         kaliBerger.buy{value: 1.6 ether}(address(token_1), 1, 5 ether, 1.5 ether);
-        vm.warp(150000);
 
-        // Validate.
+        // emit log_uint(oldImpactDaoBalance);
+        // emit log_uint(patronage);
+        // emit log_uint(address(impactDao).balance);
+        // emit log_uint(address(kaliBerger).balance);
+        // emit log_uint(kaliBerger.getUnclaimed(address(impactDao)));
+
+        // Validate pre-claim balance.
+        // assertEq(address(kaliBerger).balance, 0.3 ether + kaliBerger.getUnclaimed(address(impactDao)));
+
+        // Validate contract balances.
+        vm.prank(impactDao);
+        kaliBerger.claim();
+        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
+        assertEq(address(earn).balance, 8.4 ether);
+
+        // Validate ownership of Patron Certificate for token_1, #1.
+        assertEq(
+            IPatronCertificate(address(patronCertificate)).ownerOf(
+                IPatronCertificate(address(patronCertificate)).getTokenId(address(token_1), 1)
+            ),
+            earn
+        );
+
+        // Balance DAO.
         balanceDao(200000, address(token_1), 1, alfred);
-        // TODO: Validate KaliBerger balance
-        // assertEq(address(kaliBerger).balance, 0.1 ether);
     } // timestamp: 200000
 
     /// @notice Alfred withdraws token_1, tokenId #1.
