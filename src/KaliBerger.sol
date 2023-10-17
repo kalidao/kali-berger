@@ -24,12 +24,8 @@ contract KaliBerger is Storage {
 
     error NotAuthorized();
     error TransferFailed();
-    error InvalidPrice();
     error InvalidExit();
-    error NotOwner();
     error NotInitialized();
-    error InvalidPurchase();
-    error InvalidClaim();
     error InvalidAmount();
 
     /// -----------------------------------------------------------------------
@@ -57,7 +53,7 @@ contract KaliBerger is Storage {
     }
 
     modifier onlyOwner(address token, uint256 tokenId) {
-        if (this.getOwner(token, tokenId) != msg.sender) revert NotOwner();
+        if (this.getOwner(token, tokenId) != msg.sender) revert NotAuthorized();
         _;
     }
 
@@ -146,7 +142,21 @@ contract KaliBerger is Storage {
         _balance(token, tokenId, this.getImpactDao(token, tokenId));
     }
 
-    /// @notice Summon an Impact DAO
+    /// @notice Update Impact DAO balance when ERC721 is purchased.
+    /// @param token ERC721 token address.
+    /// @param tokenId ERC721 tokenId.
+    /// @param patron Patron of ERC721.
+    function updateBalances(address token, uint256 tokenId, address impactDao, address patron) internal {
+        if (impactDao == address(0)) {
+            // Summon DAO with 50/50 ownership between creator and patron(s).
+            this.setImpactDao(token, tokenId, summonDao(token, tokenId, this.getCreator(token, tokenId), patron));
+        } else {
+            // Update DAO balance.
+            _balance(token, tokenId, impactDao);
+        }
+    }
+
+    /// @notice Summon an Impact DAO.
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
     /// @param creator Creator of ERC721.
@@ -196,20 +206,6 @@ contract KaliBerger is Storage {
         return impactDao;
     }
 
-    /// @notice Update Impact DAO balance when ERC721 is purchased.
-    /// @param token ERC721 token address.
-    /// @param tokenId ERC721 tokenId.
-    /// @param patron Patron of ERC721.
-    function updateBalances(address token, uint256 tokenId, address impactDao, address patron) internal {
-        if (impactDao == address(0)) {
-            // Summon DAO with 50/50 ownership between creator and patron(s).
-            this.setImpactDao(token, tokenId, summonDao(token, tokenId, this.getCreator(token, tokenId), patron));
-        } else {
-            // Update DAO balance.
-            _balance(token, tokenId, impactDao);
-        }
-    }
-
     /// @notice Rebalance Impact DAO.
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
@@ -246,9 +242,10 @@ contract KaliBerger is Storage {
     /// Unclaimed Logic
     /// -----------------------------------------------------------------------
 
+    /// @notice Claim tax revenue and unsuccessful transfers.
     function claim() external payable {
         uint256 amount = this.getUnclaimed(msg.sender);
-        if (amount == 0) revert InvalidClaim();
+        if (amount == 0) revert InvalidAmount();
 
         deleteUnclaimed(msg.sender);
 
@@ -300,12 +297,12 @@ contract KaliBerger is Storage {
     /// @notice Make a deposit.
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
-    function addDeposit(address token, uint256 tokenId)
+    function addDeposit(address token, uint256 tokenId, uint256 amount)
         external
         payable
-        onlyOwner(token, tokenId)
         collectPatronage(token, tokenId)
     {
+        if (amount != msg.value) revert InvalidAmount();
         _addDeposit(token, tokenId, msg.value);
     }
 
@@ -591,7 +588,10 @@ contract KaliBerger is Storage {
     //     }
     // }
 
-    // credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
+    /// @notice Internal function to collect patronage.
+    /// @param token ERC721 token address.
+    /// @param tokenId ERC721 tokenId.
+    /// credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
     function _collectPatronage(address token, uint256 tokenId) internal {
         uint256 price = this.getPrice(token, tokenId);
         uint256 toCollect = this.patronageToCollect(token, tokenId);
@@ -638,6 +638,9 @@ contract KaliBerger is Storage {
         }
     }
 
+    /// @notice Internal function to foreclose.
+    /// @param token ERC721 token address.
+    /// @param tokenId ERC721 tokenId.
     function _foreclose(address token, uint256 tokenId) internal {
         transferPatronCertificate(token, tokenId, address(0), address(this), 0);
         deleteDeposit(token, tokenId);
@@ -649,6 +652,11 @@ contract KaliBerger is Storage {
     /// -----------------------------------------------------------------------
 
     /// @notice Internal function to transfer ERC721.
+    /// @param token ERC721 token address.
+    /// @param tokenId ERC721 tokenId.
+    /// @param currentOwner Current owner of ERC721.
+    /// @param newOwner New owner of ERC721.
+    /// @param price Price of ERC721.
     // credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
     function transferPatronCertificate(
         address token,
@@ -685,14 +693,19 @@ contract KaliBerger is Storage {
         // Update time of acquisition.
         setTimeAcquired(token, tokenId, block.timestamp);
 
-        // Add new owner as patron
+        // Add new owner as patron.
         setPatron(token, tokenId, newOwner);
 
-        // Toggle new owner's patron status
+        // Toggle new owner's patron status.
         setPatronStatus(token, tokenId, newOwner, true);
     }
 
-    /// @notice Internal function to pdrocess purchase payment.
+    /// @notice Process purchase payment.
+    /// @param token ERC721 token address.
+    /// @param tokenId ERC721 tokenId.
+    /// @param currentOwner Current owner of ERC721.
+    /// @param newPrice New price of ERC721.
+    /// @param currentPrice Current price of ERC721.
     /// credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
     function processPayment(
         address token,
@@ -703,7 +716,7 @@ contract KaliBerger is Storage {
     ) internal {
         // Confirm price.
         uint256 price = this.getPrice(token, tokenId);
-        if (price != currentPrice || newPrice == 0 || currentPrice > msg.value) revert InvalidPurchase();
+        if (price != currentPrice || newPrice == 0 || currentPrice > msg.value) revert InvalidAmount();
 
         // Add purchase price to patron contribution.
         addPatronContribution(token, tokenId, msg.sender, price);
@@ -721,8 +734,6 @@ contract KaliBerger is Storage {
 
         // Make deposit, if any.
         _addDeposit(token, tokenId, msg.value - price);
-        // (bool _success,) = address(this).call{value: msg.value - price}("");
-        // if (!_success) revert TransferFailed();
     }
 
     /// @notice Interface for any contract that wants to support safeTransfers from ERC721 asset contracts.
