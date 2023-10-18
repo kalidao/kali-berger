@@ -2,7 +2,6 @@
 pragma solidity >=0.8.4;
 
 import {LibString} from "../lib/solbase/src/utils/LibString.sol";
-// import {SafeTransferLib} from "../lib/solbase/src/utils/SafeTransferLib.sol";
 import {IERC721} from "../lib/forge-std/src/interfaces/IERC721.sol";
 import {IERC20} from "../lib/forge-std/src/interfaces/IERC20.sol";
 
@@ -341,7 +340,13 @@ contract KaliBerger is Storage {
         this.setAddress(keccak256(abi.encode(token, tokenId, ".impactDao")), impactDao);
     }
 
-    function setTax(address token, uint256 tokenId, uint256 _tax) external payable onlyOperator {
+    function setTax(address token, uint256 tokenId, uint256 _tax)
+        external
+        payable
+        onlyOperator
+        collectPatronage(token, tokenId)
+    {
+        if (_tax > 100) revert InvalidAmount();
         this.setUint(keccak256(abi.encode(token, tokenId, ".tax")), _tax);
     }
 

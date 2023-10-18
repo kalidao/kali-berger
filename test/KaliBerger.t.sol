@@ -149,7 +149,7 @@ contract KaliBergerTest is Test {
             * (block.timestamp - kaliBerger.getTimeLastCollected(address(token), tokenId))
             * kaliBerger.getTax(address(token), tokenId) / 365 days / 100;
         assertEq(kaliBerger.patronageToCollect(address(token), tokenId), amount);
-        // emit log_uint(amount);
+        emit log_uint(amount);
     }
 
     /// @notice Anyone can rebalance DAO tokens at any time.
@@ -171,43 +171,19 @@ contract KaliBergerTest is Test {
 
         // Validate
         if (creator == alfred) assertEq(creator_balance, bob_balance + charlie_balance + earn_balance);
+
+        // TODO: ACTIVATE OTHER TOKEN PATTERNS TO CONFIRM CONTRACT BALANCES WORK PROPERLY
         // if (creator == bob) assertEq(creator_balance, alfred_balance + charlie_balance + earn_balance);
         // if (creator == charlie) assertEq(creator_balance, alfred_balance + bob_balance + earn_balance);
-        emit log_uint(alfred_balance);
-        emit log_uint(bob_balance);
-        emit log_uint(charlie_balance);
-        emit log_uint(earn_balance);
+        // emit log_uint(alfred_balance);
+        // emit log_uint(bob_balance);
+        // emit log_uint(charlie_balance);
+        // emit log_uint(earn_balance);
     }
 
     /// -----------------------------------------------------------------------
     /// Test Logic
     /// -----------------------------------------------------------------------
-
-    /// @notice With KaliBerger uninitialized, Bob tries to buy tokens and gets an Uninitialized() error.
-    function testUninitialized() public payable {
-        vm.warp(100);
-
-        // Deal Bob ether
-        vm.deal(bob, 10 ether);
-
-        // Bob buys
-        vm.expectRevert(KaliBerger.NotInitialized.selector);
-        vm.prank(bob);
-        kaliBerger.buy{value: 0.1 ether}(address(token_3), 1, 1 ether, 0);
-    } // timestamp: 1500
-
-    /// @notice Charlie tries to escrows tokenId #1 of token_1 and triggers NotAuthorized() error.
-    function testEscrow_byOthers() public payable {
-        // Approve KaliBerger to transfer ERC721
-        vm.prank(alfred);
-        token_1.approve(address(kaliBerger), 1);
-        vm.warp(200);
-
-        // Charlie escrows Alfred's NFT
-        vm.expectRevert(KaliBerger.NotAuthorized.selector);
-        vm.prank(charlie);
-        kaliBerger.escrow(address(token_1), 1);
-    }
 
     /// @notice The Gang escrows their tokens.
     function testEscrow() public payable {
@@ -223,7 +199,7 @@ contract KaliBergerTest is Test {
 
         // DAO approves.
         vm.warp(500);
-        approve(token_1, 1); // 500
+        approve(token_1, 1); // 500x
 
         // DAO approves.
         vm.warp(1000);
@@ -334,18 +310,6 @@ contract KaliBergerTest is Test {
         validatePatronageToCollect(token_1, 1);
     } // timestamp: 5000
 
-    /// @notice Charlie tries to set a new price and gets an NotAuthorized() error.
-    function testBuy_setPrice_byOthers() public payable {
-        // Bob buys.
-        testBuy();
-        vm.warp(4500);
-
-        // Charlie tries to set new price on behalf of Alfred.
-        vm.expectRevert(KaliBerger.NotAuthorized.selector);
-        vm.prank(charlie);
-        kaliBerger.setPrice(address(token_1), 1, 2 ether);
-    } // timestamp: 5000
-
     /// @notice Bob add deposits to maintain his ownership of token_1, token #1 for a longer period of time.
     function testBuy_addDeposit() public payable {
         // Bob buys.
@@ -375,6 +339,27 @@ contract KaliBergerTest is Test {
         assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
         assertEq(address(kaliBerger).balance, oldBalance - address(impactDao).balance);
     } // timestamp: 4500
+
+    /// @notice DAO changes tax
+    function testBuy_setTax() public payable {
+        // Bob buys.
+        testBuy();
+
+        // Validate patronage to collect.
+        vm.warp(6600);
+        validatePatronageToCollect(token_1, 1);
+
+        // Set new tax rate.
+        vm.prank(dao);
+        kaliBerger.setTax(address(token_1), 1, 30);
+
+        // Validate patronage to collect.
+        vm.warp(9200);
+        validatePatronageToCollect(token_1, 1);
+
+        // Validate patron balances.
+        balanceDao(10000, address(token_1), 1, alfred);
+    }
 
     /// @notice Charlie add deposits to help Bob maintain ownership of token_1, token #1 for a longer period of time.
     function testBuy_addDeposit_byOthers() public payable {
@@ -469,30 +454,6 @@ contract KaliBergerTest is Test {
         // emit log_uint(address(kaliBerger).balance);
     } // timestamp: 6000
 
-    /// @notice Bob withdraws too much and triggers InvalidExit() error.
-    function testBuy_exit_invalidExit() public payable {
-        // Add deposit.
-        testBuy_addDeposit();
-        vm.warp(5000);
-
-        // InvalidExit()
-        vm.expectRevert(KaliBerger.InvalidExit.selector);
-        vm.prank(bob);
-        kaliBerger.exit(address(token_1), 1, 1 ether);
-    }
-
-    /// @notice Charlie tries to withdraw from deposit and triggers NotAuthorized() error.
-    function testBuy_exit_byOthers() public payable {
-        // Add deposit.
-        testBuy_addDeposit();
-        vm.warp(5000);
-
-        // InvalidExit()
-        vm.expectRevert(KaliBerger.NotAuthorized.selector);
-        vm.prank(charlie);
-        kaliBerger.exit(address(token_1), 1, 0.2 ether);
-    }
-
     /// @notice Charlie buys token_1, tokenId #1 and declares new price for sale.
     function testBuy_secondBuy() public payable {
         // Escrow & approve
@@ -576,22 +537,6 @@ contract KaliBergerTest is Test {
         balanceDao(2707346509, address(token_1), 1, alfred);
     } // timestamp: 2707346509
 
-    /// @notice Alfred tries to withdraw token_1, tokenId #1 but cannot bc it has not
-    ///         foreclosed yet.
-    function testBuy_pull_() public payable {
-        // Continuing from third buy by Earn.
-        testBuy_secondBuy();
-
-        // InvalidExit()
-        vm.expectRevert(KaliBerger.InvalidExit.selector);
-        vm.prank(alfred);
-        kaliBerger.pull(address(token_1), 1);
-
-        // Validate
-        assertEq(token_1.balanceOf(alfred), 0);
-        assertEq(token_1.balanceOf(address(kaliBerger)), 1);
-    } // timestamp: 5500
-
     /// @notice Earn buys token_1, tokenId #1 and declares new price for sale.
     function testBuy_thirdBuy() public payable {
         // Continuing from second buy by Charlie.
@@ -656,6 +601,88 @@ contract KaliBergerTest is Test {
         assertEq(kaliBerger.getTokenPurchaseStatus(address(token_1), 1), false);
         balanceDao(timestamp, address(token_1), 1, alfred);
     } // timestamp: 10000000
+
+    /// -----------------------------------------------------------------------
+    /// Custom Error Test Logic
+    /// -----------------------------------------------------------------------
+
+    /// @notice With KaliBerger uninitialized, Bob tries to buy tokens and gets an Uninitialized() error.
+    function testUninitialized() public payable {
+        vm.warp(100);
+
+        // Deal Bob ether
+        vm.deal(bob, 10 ether);
+
+        // Bob buys
+        vm.expectRevert(KaliBerger.NotInitialized.selector);
+        vm.prank(bob);
+        kaliBerger.buy{value: 0.1 ether}(address(token_3), 1, 1 ether, 0);
+    } // timestamp: 1500
+
+    /// @notice Charlie tries to escrows tokenId #1 of token_1 and triggers NotAuthorized() error.
+    function testEscrow_byOthers() public payable {
+        // Approve KaliBerger to transfer ERC721
+        vm.prank(alfred);
+        token_1.approve(address(kaliBerger), 1);
+        vm.warp(200);
+
+        // Charlie escrows Alfred's NFT
+        vm.expectRevert(KaliBerger.NotAuthorized.selector);
+        vm.prank(charlie);
+        kaliBerger.escrow(address(token_1), 1);
+    }
+
+    /// @notice Charlie tries to set a new price and gets an NotAuthorized() error.
+    function testBuy_setPrice_byOthers() public payable {
+        // Bob buys.
+        testBuy();
+        vm.warp(4500);
+
+        // Charlie tries to set new price on behalf of Alfred.
+        vm.expectRevert(KaliBerger.NotAuthorized.selector);
+        vm.prank(charlie);
+        kaliBerger.setPrice(address(token_1), 1, 2 ether);
+    } // timestamp: 5000
+
+    /// @notice Bob withdraws too much and triggers InvalidExit() error.
+    function testBuy_exit_invalidExit() public payable {
+        // Add deposit.
+        testBuy_addDeposit();
+        vm.warp(5000);
+
+        // InvalidExit()
+        vm.expectRevert(KaliBerger.InvalidExit.selector);
+        vm.prank(bob);
+        kaliBerger.exit(address(token_1), 1, 1 ether);
+    }
+
+    /// @notice Charlie tries to withdraw from deposit and triggers NotAuthorized() error.
+    function testBuy_exit_byOthers() public payable {
+        // Add deposit.
+        testBuy_addDeposit();
+        vm.warp(5000);
+
+        // InvalidExit()
+        vm.expectRevert(KaliBerger.NotAuthorized.selector);
+        vm.prank(charlie);
+        kaliBerger.exit(address(token_1), 1, 0.2 ether);
+    }
+
+    /// @notice Alfred tries to withdraw token_1, tokenId #1 but cannot bc it has not
+    ///         foreclosed yet.
+    function testBuy_pull_() public payable {
+        // Continuing from third buy by Earn.
+        testBuy_secondBuy();
+
+        // InvalidExit()
+        vm.expectRevert(KaliBerger.InvalidExit.selector);
+        vm.prank(alfred);
+        kaliBerger.pull(address(token_1), 1);
+
+        // Validate
+        assertEq(token_1.balanceOf(alfred), 0);
+        assertEq(token_1.balanceOf(address(kaliBerger)), 1);
+    } // timestamp: 5500
 
     /// @notice Earn tries to withdraw token_1, tokenId #1 on behalf of Alfred,
     /// @notice but triggers NotAuthorized() error because Alfred is the creator of NFT.

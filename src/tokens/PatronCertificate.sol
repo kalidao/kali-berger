@@ -34,9 +34,9 @@ contract PatronCertificate {
     /// Metadata Storage/Logic
     /// -----------------------------------------------------------------------
 
-    string public name;
+    string public constant name = "Patron Certificate";
 
-    string public symbol;
+    string public constant symbol = "PC";
 
     function tokenURI(uint256 tokenId) public view virtual returns (string memory) {
         return _buildURI(tokenId);
@@ -82,8 +82,6 @@ contract PatronCertificate {
     /// -----------------------------------------------------------------------
 
     constructor(address _minter) {
-        name = "Patron Certificate";
-        symbol = "PC";
         minter = _minter;
     }
 
@@ -117,6 +115,7 @@ contract PatronCertificate {
     function transferFrom(address from, address to, uint256 id) public virtual {
         if (to == address(0)) revert InvalidRecipient();
 
+        // Minter-only transfer.
         if (msg.sender != minter) revert Unauthorized();
 
         // Underflow of the sender's balance is impossible because we check for
