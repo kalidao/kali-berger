@@ -30,7 +30,7 @@ contract Storage {
     /// -----------------------------------------------------------------------
 
     function init(address dao, address target) internal {
-        addressStorage[keccak256(abi.encodePacked("dao"))] = dao;
+        _setDao(dao);
         if (target != address(0)) booleanStorage[keccak256(abi.encodePacked("playground.", target))] = true;
     }
 
@@ -75,6 +75,30 @@ contract Storage {
         booleanStorage[_key] = _value;
     }
 
+    /// @param dao The DAO address.
+    function _setDao(address dao) internal {
+        addressStorage[keccak256(abi.encodePacked("dao"))] = dao;
+    }
+
+    /// @param _key The key for the record.
+    function _setAddress(bytes32 _key, address _value) internal {
+        addressStorage[_key] = _value;
+    }
+
+    /// @param _key The key for the record.
+    function _setUint(bytes32 _key, uint256 _value) internal {
+        uintStorage[_key] = _value;
+    }
+
+    /// @param _key The key for the record.
+    function _setString(bytes32 _key, string calldata _value) internal {
+        stringStorage[_key] = _value;
+    }
+
+    /// @param _key The key for the record.
+    function _setBool(bytes32 _key, bool _value) internal {
+        booleanStorage[_key] = _value;
+    }
     /// -----------------------------------------------------------------------
     /// General Sotrage - Delete Logic
     /// -----------------------------------------------------------------------

@@ -185,8 +185,8 @@ contract KaliBerger is Storage {
         uint256 count = this.getBergerCount();
         address payable impactDao = payable(
             KaliDAOfactory(this.getKaliDaoFactory()).deployKaliDAO(
-                string.concat("BergerTime #", LibString.toString(count)),
-                string.concat("BT #", LibString.toString(count)),
+                string.concat("ImpactDAO #", LibString.toString(count)),
+                string.concat("ID #", LibString.toString(count)),
                 " ",
                 true,
                 extensions,
@@ -530,11 +530,11 @@ contract KaliBerger is Storage {
     /// -----------------------------------------------------------------------
 
     function deletePrice(address token, uint256 tokenId) internal {
-        return deleteUint(keccak256(abi.encode(token, tokenId, ".price")));
+        deleteUint(keccak256(abi.encode(token, tokenId, ".price")));
     }
 
     function deleteDeposit(address token, uint256 tokenId) internal {
-        return deleteUint(keccak256(abi.encode(token, tokenId, ".deposit")));
+        deleteUint(keccak256(abi.encode(token, tokenId, ".deposit")));
     }
 
     function deleteUnclaimed(address user) internal {
@@ -542,7 +542,7 @@ contract KaliBerger is Storage {
     }
 
     function deleteTokenPurchaseStatus(address token, uint256 tokenId) internal {
-        return deleteBool(keccak256(abi.encode(token, tokenId, ".forSale")));
+        deleteBool(keccak256(abi.encode(token, tokenId, ".forSale")));
     }
 
     /// -----------------------------------------------------------------------
