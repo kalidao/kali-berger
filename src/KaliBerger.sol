@@ -73,7 +73,7 @@ contract KaliBerger is Storage {
     /// @notice Escrow ERC721 NFT before making it available for purchase.
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
-    function escrow(address token, uint256 tokenId) external payable {
+    function escrow(address token, uint256 tokenId, address creator) external payable {
         // Confirm msg.sender is creator and owner of token
         if (IERC721(token).ownerOf(tokenId) != msg.sender) revert NotAuthorized();
 
@@ -81,7 +81,7 @@ contract KaliBerger is Storage {
         IERC721(token).safeTransferFrom(msg.sender, address(this), tokenId);
 
         // Set creator
-        setCreator(token, tokenId, msg.sender);
+        setCreator(token, tokenId, creator);
     }
 
     /// @notice Pull ERC721 NFT from escrow when it is idle.
