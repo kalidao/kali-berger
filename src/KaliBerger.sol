@@ -33,7 +33,7 @@ contract KaliBerger is Storage {
 
     function initialize(address dao, address daoFactory, address minter) external {
         if (daoFactory != address(0)) {
-            init(dao, address(0));
+            init(dao);
             this.setKaliDaoFactory(daoFactory);
             this.setCertificateMinter(minter);
         }
@@ -81,7 +81,7 @@ contract KaliBerger is Storage {
         IERC721(token).safeTransferFrom(msg.sender, address(this), tokenId);
 
         // Set creator
-        this.setCreator(token, tokenId, msg.sender);
+        setCreator(token, tokenId, msg.sender);
     }
 
     /// @notice Pull ERC721 NFT from escrow when it is idle.
@@ -148,7 +148,7 @@ contract KaliBerger is Storage {
     function updateBalances(address token, uint256 tokenId, address impactDao, address patron) internal {
         if (impactDao == address(0)) {
             // Summon DAO with 50/50 ownership between creator and patron(s).
-            this.setImpactDao(token, tokenId, summonDao(token, tokenId, this.getCreator(token, tokenId), patron));
+            setImpactDao(token, tokenId, summonDao(token, tokenId, this.getCreator(token, tokenId), patron));
         } else {
             // Update DAO balance.
             _balance(token, tokenId, impactDao);
@@ -198,7 +198,7 @@ contract KaliBerger is Storage {
         );
 
         // Store dao address for future.
-        this.setImpactDao(token, tokenId, impactDao);
+        setImpactDao(token, tokenId, impactDao);
 
         // Increment number of impactDAOs.
         incrementBergerCount();
@@ -336,7 +336,7 @@ contract KaliBerger is Storage {
         this.setAddress(keccak256(abi.encodePacked("certificate.minter")), factory);
     }
 
-    function setImpactDao(address token, uint256 tokenId, address impactDao) external payable onlyOperator {
+    function setImpactDao(address token, uint256 tokenId, address impactDao) internal {
         this.setAddress(keccak256(abi.encode(token, tokenId, ".impactDao")), impactDao);
     }
 
@@ -350,7 +350,7 @@ contract KaliBerger is Storage {
         this.setUint(keccak256(abi.encode(token, tokenId, ".tax")), _tax);
     }
 
-    function setCreator(address token, uint256 tokenId, address creator) external payable onlyOperator {
+    function setCreator(address token, uint256 tokenId, address creator) internal {
         this.setAddress(keccak256(abi.encode(token, tokenId, ".creator")), creator);
     }
 
