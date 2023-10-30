@@ -595,6 +595,17 @@ contract KaliBergerTest is Test {
     function testMultipleBuy() public payable {
         // Escrow & approve
         testApprove();
+
+        // Darius buys.
+        primaryBuy(darius, address(token_1), 1, 1 ether, alfred);
+        primaryBuy(darius, address(token_2), 1, 1 ether, bob);
+        primaryBuy(darius, address(token_3), 1, 1 ether, charlie);
+    }
+
+    /// @notice Darius buys all tokens and declares new prices for each
+    function testMultipleBuy_() public payable {
+        // Escrow & approve
+        testApprove();
         vm.warp(3000);
 
         // Deal Darius ether
@@ -729,11 +740,9 @@ contract KaliBergerTest is Test {
     /// @notice Earn tries to withdraw token_1, tokenId #1 on behalf of Alfred,
     /// @notice but triggers NotAuthorized() error because Alfred is the creator of NFT.
     function testSingleBuy_pull_notAuthorized() public payable {
-        uint256 timestamp = 10000000;
         // Continuing from third buy by Earn.
         testSingleBuy_thirdBuy();
-        vm.warp(timestamp);
-        // emit log_uint(timestamp);
+        vm.warp(block.timestamp + 10000000);
 
         // Earn withdraws but errors out.
         vm.expectRevert(KaliBerger.NotAuthorized.selector);
@@ -744,8 +753,8 @@ contract KaliBergerTest is Test {
         assertEq(token_1.balanceOf(alfred), 0);
         assertEq(token_1.balanceOf(earn), 0);
         assertEq(token_1.balanceOf(address(kaliBerger)), 1);
-        balanceDao(timestamp, address(token_1), 1, alfred);
-    } // timestamp: 10000000
+        balanceDao(block.timestamp + 10000, address(token_1), 1, alfred);
+    }
 
     function testReceiveETH() public payable {
         (bool sent,) = address(kaliBerger).call{value: 5 ether}("");
