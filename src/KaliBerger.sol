@@ -34,8 +34,8 @@ contract KaliBerger is Storage {
     function initialize(address dao, address daoFactory, address minter) external {
         if (daoFactory != address(0)) {
             init(dao);
-            this.setKaliDaoFactory(daoFactory);
-            this.setCertificateMinter(minter);
+            _setKaliDaoFactory(daoFactory);
+            _setCertificateMinter(minter);
         }
     }
 
@@ -226,7 +226,7 @@ contract KaliBerger is Storage {
             if (contribution > _contribution) {
                 IKaliTokenManager(dao).mintTokens(creator, contribution - _contribution);
                 IKaliTokenManager(dao).mintTokens(_patron, contribution - _contribution);
-            } else {
+            } else if (contribution < _contribution) {
                 IKaliTokenManager(dao).burnTokens(creator, _contribution - contribution);
                 IKaliTokenManager(dao).burnTokens(_patron, _contribution - contribution);
             }
@@ -329,15 +329,23 @@ contract KaliBerger is Storage {
     /// -----------------------------------------------------------------------
 
     function setKaliDaoFactory(address factory) external payable onlyOperator {
-        this.setAddress(keccak256(abi.encodePacked("dao.factory")), factory);
+        _setAddress(keccak256(abi.encodePacked("dao.factory")), factory);
+    }
+
+    function _setKaliDaoFactory(address factory) internal {
+        _setAddress(keccak256(abi.encodePacked("dao.factory")), factory);
     }
 
     function setCertificateMinter(address factory) external payable onlyOperator {
-        this.setAddress(keccak256(abi.encodePacked("certificate.minter")), factory);
+        _setAddress(keccak256(abi.encodePacked("certificate.minter")), factory);
+    }
+
+    function _setCertificateMinter(address factory) internal {
+        _setAddress(keccak256(abi.encodePacked("certificate.minter")), factory);
     }
 
     function setImpactDao(address token, uint256 tokenId, address impactDao) internal {
-        this.setAddress(keccak256(abi.encode(token, tokenId, ".impactDao")), impactDao);
+        _setAddress(keccak256(abi.encode(token, tokenId, ".impactDao")), impactDao);
     }
 
     function setTax(address token, uint256 tokenId, uint256 _tax)
@@ -347,48 +355,48 @@ contract KaliBerger is Storage {
         collectPatronage(token, tokenId)
     {
         if (_tax > 100) revert InvalidAmount();
-        this.setUint(keccak256(abi.encode(token, tokenId, ".tax")), _tax);
+        _setUint(keccak256(abi.encode(token, tokenId, ".tax")), _tax);
     }
 
     function setCreator(address token, uint256 tokenId, address creator) internal {
-        this.setAddress(keccak256(abi.encode(token, tokenId, ".creator")), creator);
+        _setAddress(keccak256(abi.encode(token, tokenId, ".creator")), creator);
     }
 
     function setTokenDetail(address token, uint256 tokenId, string calldata detail) external payable onlyOperator {
-        this.setString(keccak256(abi.encode(token, tokenId, ".detail")), detail);
+        _setString(keccak256(abi.encode(token, tokenId, ".detail")), detail);
     }
 
     function _setTokenDetail(address token, uint256 tokenId, string calldata detail) internal {
-        this.setString(keccak256(abi.encode(token, tokenId, ".detail")), detail);
+        _setString(keccak256(abi.encode(token, tokenId, ".detail")), detail);
     }
 
     function setTokenPurchaseStatus(address token, uint256 tokenId, bool _forSale) internal {
-        this.setBool(keccak256(abi.encode(token, tokenId, ".forSale")), _forSale);
+        _setBool(keccak256(abi.encode(token, tokenId, ".forSale")), _forSale);
     }
 
     function _setPrice(address token, uint256 tokenId, uint256 price) internal {
-        this.setUint(keccak256(abi.encode(token, tokenId, ".price")), price);
+        _setUint(keccak256(abi.encode(token, tokenId, ".price")), price);
     }
 
     function setTimeLastCollected(address token, uint256 tokenId, uint256 timestamp) internal {
-        this.setUint(keccak256(abi.encode(token, tokenId, ".timeLastCollected")), timestamp);
+        _setUint(keccak256(abi.encode(token, tokenId, ".timeLastCollected")), timestamp);
     }
 
     function setTimeAcquired(address token, uint256 tokenId, uint256 timestamp) internal {
-        this.setUint(keccak256(abi.encode(token, tokenId, ".timeAcquired")), timestamp);
+        _setUint(keccak256(abi.encode(token, tokenId, ".timeAcquired")), timestamp);
     }
 
     function setOwner(address token, uint256 tokenId, address owner) internal {
-        this.setAddress(keccak256(abi.encode(token, tokenId, ".owner")), owner);
+        _setAddress(keccak256(abi.encode(token, tokenId, ".owner")), owner);
     }
 
     function setPatron(address token, uint256 tokenId, address patron) internal {
         incrementPatronId(token, tokenId);
-        this.setAddress(keccak256(abi.encode(token, tokenId, this.getPatronCount(token, tokenId))), patron);
+        _setAddress(keccak256(abi.encode(token, tokenId, this.getPatronCount(token, tokenId))), patron);
     }
 
     function setPatronStatus(address token, uint256 tokenId, address patron, bool status) internal {
-        this.setBool(keccak256(abi.encode(token, tokenId, patron, ".isPatron")), status);
+        _setBool(keccak256(abi.encode(token, tokenId, patron, ".isPatron")), status);
     }
 
     /// -----------------------------------------------------------------------
@@ -649,7 +657,6 @@ contract KaliBerger is Storage {
     function _foreclose(address token, uint256 tokenId) internal {
         transferPatronCertificate(token, tokenId, address(0), address(this), 0);
         deleteDeposit(token, tokenId);
-        deleteTokenPurchaseStatus(token, tokenId);
     }
 
     /// -----------------------------------------------------------------------

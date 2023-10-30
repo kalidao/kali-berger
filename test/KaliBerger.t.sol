@@ -67,14 +67,12 @@ contract KaliBergerTest is Test {
         kaliBerger = new KaliBerger();
         kaliBerger_uninitialized = new KaliBerger();
 
+        // Deploy and initialize PatronCertificate contract.
+        patronCertificate = new PatronCertificate(address(kaliBerger));
+
         // Initialize.
         vm.prank(dao);
         kaliBerger.initialize(dao, address(factory), address(patronCertificate));
-
-        // Deploy and initialize PatronCertificate contract.
-        patronCertificate = new PatronCertificate(address(kaliBerger));
-        vm.prank(dao);
-        kaliBerger.setCertificateMinter(address(patronCertificate));
 
         // Deploy 3 ERC721 tokens.
         token_1 = deployErc721();
@@ -173,33 +171,29 @@ contract KaliBergerTest is Test {
         if (creator == alfred) assertEq(creator_balance, bob_balance + charlie_balance + earn_balance + darius_balance);
         if (creator == bob) assertEq(creator_balance, alfred_balance + charlie_balance + earn_balance + darius_balance);
         if (creator == charlie) assertEq(creator_balance, alfred_balance + bob_balance + earn_balance + darius_balance);
-        emit log_uint(alfred_balance);
-        emit log_uint(bob_balance);
-        emit log_uint(charlie_balance);
-        emit log_uint(darius_balance);
+        // emit log_uint(alfred_balance);
+        // emit log_uint(bob_balance);
+        // emit log_uint(charlie_balance);
+        // emit log_uint(darius_balance);
         // emit log_uint(earn_balance);
     }
 
     /// @notice Buy ERC721.
-    function buy(address buyer, address token, uint256 tokenId, uint256 newPrice, address creator) public payable {
-        // Escrow & approve
-        testApprove();
+    function primaryBuy(address buyer, address token, uint256 tokenId, uint256 newPrice, address creator)
+        public
+        payable
+    {
         vm.warp(block.timestamp + 1000);
 
-        // Deal Bob ether
+        // Deal buyer ether if buyer does not have any ether.
         if (address(buyer).balance < 0.01 ether) vm.deal(buyer, 10 ether);
 
         // Get berger count before purchase.
         uint256 count = kaliBerger.getBergerCount();
 
-        // Bob buys
+        // Buyer buys.
         vm.prank(buyer);
         kaliBerger.buy{value: 0.1 ether}(token, tokenId, newPrice, 0);
-        vm.warp(block.timestamp + 1000);
-
-        // Validate balances.
-        assertEq(address(kaliBerger).balance, 0.1 ether);
-        assertEq(address(buyer).balance, 9.9 ether);
 
         // Validate summoning of ImpactDAO.
         assertEq(kaliBerger.getBergerCount(), count == 0 ? 1 : ++count);
@@ -213,7 +207,202 @@ contract KaliBergerTest is Test {
         );
 
         // Balance DAO.
-        balanceDao(4000, address(token_1), 1, creator);
+        balanceDao(block.timestamp + 1000, address(token), tokenId, creator);
+    }
+
+    /// @notice Buy ERC721.
+    function secondaryBuy(address buyer, address token, uint256 tokenId, uint256 newPrice, address creator)
+        public
+        payable
+    {
+        vm.warp(block.timestamp + 1000);
+
+        // Deal buyer ether if buyer does not have any ether.
+        if (address(buyer).balance < 0.01 ether) vm.deal(buyer, 10 ether);
+
+        // Retrieve data for validation.
+        address impactDao = kaliBerger.getImpactDao(address(token), tokenId);
+        uint256 patronage = kaliBerger.patronageToCollect(address(token), tokenId);
+        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
+
+        // Get current price and add slightly more as deposit.
+        uint256 currentPrice = kaliBerger.getPrice(token, tokenId);
+
+        // Buyer buys.
+        vm.prank(buyer);
+        kaliBerger.buy{value: currentPrice + 0.1 ether}(token, tokenId, newPrice, currentPrice);
+
+        // Validate number of ImpactDAOs.
+        assertEq(kaliBerger.getBergerCount(), 1);
+
+        // Validate ownership of Patron Certificate for token_1, #1.
+        assertEq(
+            IPatronCertificate(address(patronCertificate)).ownerOf(
+                IPatronCertificate(address(patronCertificate)).getTokenId(address(token), tokenId)
+            ),
+            buyer
+        );
+
+        // Get unclaimed.
+        uint256 balanceBeforeClaim = address(kaliBerger).balance;
+        uint256 unclaimed = kaliBerger.getUnclaimed(address(impactDao));
+
+        // Claim any unclaimed.
+        vm.prank(impactDao);
+        kaliBerger.claim();
+
+        // Validate contract balances.
+        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
+        assertEq(address(kaliBerger).balance, balanceBeforeClaim - unclaimed);
+
+        // Balance DAO.
+        balanceDao(block.timestamp + 1000, address(token), tokenId, creator);
+    }
+
+    /// @notice Buy ERC721 when it is foreclosed. This is different from secondaryBuy() in that we will use 0 for currentPrice to denote foreclosure status.
+    function secondaryForeclosedBuy(address buyer, address token, uint256 tokenId, uint256 newPrice, address creator)
+        public
+        payable
+    {
+        vm.warp(block.timestamp + 1000);
+
+        // Deal buyer ether if buyer does not have any ether.
+        if (address(buyer).balance < 0.01 ether) vm.deal(buyer, 10 ether);
+
+        // Retrieve data for validation.
+        address impactDao = kaliBerger.getImpactDao(address(token), tokenId);
+        uint256 oldImpactDaoBalance = address(impactDao).balance;
+        emit log_uint(oldImpactDaoBalance);
+
+        // Buyer buys.
+        vm.prank(buyer);
+        kaliBerger.buy{value: 0.1 ether}(token, tokenId, newPrice, 0);
+
+        // Validate number of ImpactDAOs.
+        assertEq(kaliBerger.getBergerCount(), 1);
+
+        // Validate ownership of Patron Certificate for token_1, #1.
+        assertEq(
+            IPatronCertificate(address(patronCertificate)).ownerOf(
+                IPatronCertificate(address(patronCertificate)).getTokenId(address(token), tokenId)
+            ),
+            buyer
+        );
+
+        // Get unclaimed.
+        uint256 oldKaliBergerBalance = address(kaliBerger).balance;
+        uint256 unclaimed = kaliBerger.getUnclaimed(address(impactDao));
+
+        // Claim any unclaimed.
+        vm.prank(impactDao);
+        kaliBerger.claim();
+
+        // Validate contract balances.
+        emit log_uint(address(impactDao).balance);
+        emit log_uint(address(kaliBerger).balance);
+        emit log_uint(unclaimed);
+        emit log_uint(oldKaliBergerBalance);
+        assertEq(address(impactDao).balance, oldImpactDaoBalance + unclaimed);
+        assertEq(address(kaliBerger).balance, oldKaliBergerBalance - unclaimed);
+
+        // Balance DAO.
+        balanceDao(block.timestamp + 1000, address(token), tokenId, creator);
+    }
+
+    /// @notice Set price.
+    function setPrice(address user, address token, uint256 tokenId, uint256 newPrice, address creator) public payable {
+        // Retrieve data for validation.
+        address impactDao = kaliBerger.getImpactDao(address(token), tokenId);
+        uint256 oldBalance = address(kaliBerger).balance;
+        uint256 patronage = kaliBerger.patronageToCollect(address(token), tokenId);
+        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
+
+        // User sets new price.
+        vm.prank(user);
+        kaliBerger.setPrice(address(token), tokenId, newPrice);
+
+        // Validate setting of new price.
+        assertEq(kaliBerger.getPrice(address(token), tokenId), newPrice);
+
+        // Validate balances.
+        vm.prank(impactDao);
+        kaliBerger.claim();
+        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
+        assertEq(address(kaliBerger).balance, oldBalance - address(impactDao).balance);
+
+        // Balance DAO.
+        balanceDao(block.timestamp + 1000, address(token), tokenId, creator);
+    }
+
+    /// @notice Add deposit.
+    function addDeposit(address user, address token, uint256 tokenId, uint256 amount, address creator) public payable {
+        // Retrieve data for validation.
+        address impactDao = kaliBerger.getImpactDao(address(token), tokenId);
+        uint256 deposit = kaliBerger.getDeposit(address(token), tokenId);
+        uint256 patronage = kaliBerger.patronageToCollect(address(token), tokenId);
+        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
+
+        // User adds deposit.
+        vm.prank(user);
+        kaliBerger.addDeposit{value: amount}(address(token), tokenId, amount);
+
+        // Retrieve data for validation.
+        uint256 balanceBeforeClaim = address(kaliBerger).balance;
+        uint256 unclaimed = kaliBerger.getUnclaimed(impactDao);
+
+        // Claim any unclaimed.
+        vm.prank(impactDao);
+        kaliBerger.claim();
+
+        // Validate balance and deposit amount.
+        assertEq(kaliBerger.getDeposit(address(token), tokenId), deposit + amount - patronage);
+        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
+        assertEq(address(kaliBerger).balance, balanceBeforeClaim - unclaimed);
+
+        // Balance DAO.
+        balanceDao(block.timestamp + 1000, address(token), tokenId, creator);
+    }
+
+    /// @notice Set tax.
+    function setTax(address token, uint256 tokenId, uint256 tax, address creator) public payable {
+        // Set new tax rate.
+        vm.prank(dao);
+        kaliBerger.setTax(token, tokenId, tax);
+
+        // Validate patron balances.
+        balanceDao(block.timestamp + 1000, token, tokenId, alfred);
+
+        // Validate tax update.
+        assertEq(kaliBerger.getTax(token, tokenId), tax);
+
+        // Balance DAO.
+        balanceDao(block.timestamp + 1000, address(token), tokenId, creator);
+    }
+
+    /// @notice Exit.
+    function exit(address user, address token, uint256 tokenId, uint256 amount, address creator) public payable {
+        // Retrieve data for validation.
+        address impactDao = kaliBerger.getImpactDao(address(token), tokenId);
+        uint256 patronage = kaliBerger.patronageToCollect(address(token), tokenId);
+        uint256 deposit = kaliBerger.getDeposit(address(token), tokenId);
+        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
+
+        // User withdraws all of deposit.
+        vm.prank(user);
+        kaliBerger.exit(address(token), tokenId, deposit - patronage);
+
+        // Validate patronage amount.
+        assertEq(kaliBerger.getDeposit(address(token), tokenId), 0);
+        assertEq(IERC721(token).balanceOf(address(kaliBerger)), tokenId);
+
+        // Validate balances.
+        vm.prank(impactDao);
+        kaliBerger.claim();
+        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
+        assertEq(address(kaliBerger).balance, 0);
+
+        // Balance DAO.
+        balanceDao(block.timestamp + 1000, address(token), tokenId, creator);
     }
 
     /// -----------------------------------------------------------------------
@@ -281,227 +470,94 @@ contract KaliBergerTest is Test {
 
     /// @notice Bob buys token_1, tokenId #1 and declares a new price for sale
     function testSingleBuy() public payable {
-        buy(bob, address(token_1), 1, 1 ether, alfred);
+        // Escrow & approve
+        testApprove();
+        vm.warp(block.timestamp + 1000);
+
+        primaryBuy(bob, address(token_1), 1, 1 ether, alfred);
     }
 
     /// @notice Unsatisfied with the first price, Bob sets a new price.
     function testSingleBuy_setPrice() public payable {
         // Bob buys.
         testSingleBuy();
-        vm.warp(block.timestamp + 1000);
-
-        // Retrieve data for validation.
-        address impactDao = kaliBerger.getImpactDao(address(token_1), 1);
-        uint256 oldBalance = address(kaliBerger).balance;
-        uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
-        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
 
         // Bob sets new price.
-        vm.prank(bob);
-        kaliBerger.setPrice(address(token_1), 1, 2 ether);
-
-        // Validate setting of new price.
-        assertEq(kaliBerger.getPrice(address(token_1), 1), 2 ether);
-
-        // Validate balances.
-        vm.prank(impactDao);
-        kaliBerger.claim();
-        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
-        assertEq(address(kaliBerger).balance, oldBalance - address(impactDao).balance);
-
-        // Validate patronage.
-        vm.warp(5000);
-        validatePatronageToCollect(token_1, 1);
+        setPrice(bob, address(token_1), 1, 2 ether, alfred);
     } // timestamp: 5000
 
     /// @notice Bob add deposits to maintain his ownership of token_1, token #1 for a longer period of time.
     function testSingleBuy_addDeposit() public payable {
         // Bob buys.
         testSingleBuy();
-        vm.warp(4500);
 
-        // Retrieve data for validation.
-        address impactDao = kaliBerger.getImpactDao(address(token_1), 1);
-        uint256 deposit = kaliBerger.getDeposit(address(token_1), 1);
-        uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
-        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
-
-        // Bob adds deposit.
-        vm.prank(bob);
-        kaliBerger.addDeposit{value: 0.5 ether}(address(token_1), 1, 0.5 ether);
-
-        // Retrieve data for validation.
-        uint256 oldBalance = address(kaliBerger).balance;
-
-        // Validate deposit amount.
-        assertEq(kaliBerger.getDeposit(address(token_1), 1), deposit + 0.5 ether - patronage);
-        validatePatronageToCollect(token_1, 1);
-
-        // Validate balances.
-        vm.prank(impactDao);
-        kaliBerger.claim();
-        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
-        assertEq(address(kaliBerger).balance, oldBalance - address(impactDao).balance);
-    } // timestamp: 4500
+        // Bob adds more ether as deposit.
+        addDeposit(bob, address(token_1), 1, 0.5 ether, alfred);
+    }
 
     /// @notice DAO changes tax.
     function testSingleBuy_setTax() public payable {
         // Bob buys.
         testSingleBuy();
 
-        // Validate patronage to collect.
-        vm.warp(6600);
-        validatePatronageToCollect(token_1, 1);
-
-        // Set new tax rate.
-        vm.prank(dao);
-        kaliBerger.setTax(address(token_1), 1, 30);
-
-        // Validate patronage to collect.
-        vm.warp(9200);
-        validatePatronageToCollect(token_1, 1);
-
-        // Validate patron balances.
-        balanceDao(10000, address(token_1), 1, alfred);
+        // Bob sets new tax.
+        setTax(address(token_1), 1, 30, alfred);
     }
 
-    /// @notice Charlie add deposits to help Bob maintain ownership of token_1, token #1 for a longer period of time.
+    /// @notice Charlie and Darius add deposits to help Bob maintain ownership of token_1, token #1 for a longer period of time.
     function testSingleBuy_addDeposit_byOthers() public payable {
         // Bob buys.
         testSingleBuy();
-        vm.warp(4500);
 
-        // Retrieve data for validation.
-        address impactDao = kaliBerger.getImpactDao(address(token_1), 1);
-        uint256 deposit = kaliBerger.getDeposit(address(token_1), 1);
-        uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
-        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
-
-        // Deal Charlie ether.
+        // Deal Charlie and Darius ether.
         vm.deal(charlie, 10 ether);
+        vm.deal(darius, 10 ether);
 
         // Charlie adds deposit.
-        vm.prank(charlie);
-        kaliBerger.addDeposit{value: 0.5 ether}(address(token_1), 1, 0.5 ether);
+        addDeposit(charlie, address(token_1), 1, 0.5 ether, alfred);
 
-        // Retrieve data for validation.
-        uint256 oldBalance = address(kaliBerger).balance;
-
-        // Validate deposit amount.
-        assertEq(kaliBerger.getDeposit(address(token_1), 1), deposit + 0.5 ether - patronage);
-        validatePatronageToCollect(token_1, 1);
-
-        // Validate balances.
-        vm.prank(impactDao);
-        kaliBerger.claim();
-        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
-        assertEq(address(kaliBerger).balance, oldBalance - address(impactDao).balance);
-    } // timestamp: 4500
+        // Darius adds deposit.
+        addDeposit(darius, address(token_1), 1, 0.5 ether, alfred);
+    }
 
     /// @notice Bob exits a portion of his previous deposit.
     function testSingleBuy_exit() public payable {
+        // Bob buys and makes deposit.
         testSingleBuy_addDeposit();
-        vm.warp(6000);
 
-        // Retrieve data for validation.
-        address impactDao = kaliBerger.getImpactDao(address(token_1), 1);
-        uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
-        uint256 deposit = kaliBerger.getDeposit(address(token_1), 1);
-        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
-        uint256 oldBalance = address(kaliBerger).balance;
-
-        // Bob exits a portion of deposit.
-        vm.prank(bob);
-        kaliBerger.exit(address(token_1), 1, 0.3 ether);
-
-        // Validate deposit amount.
-        assertEq(kaliBerger.getDeposit(address(token_1), 1), deposit - 0.3 ether - patronage);
-        validatePatronageToCollect(token_1, 1);
-
-        // Retrieve data for validation.
-        uint256 unclaimed = kaliBerger.getUnclaimed(impactDao);
-
-        // Validate balances.
-        vm.prank(impactDao);
-        kaliBerger.claim();
-        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
-        assertEq(address(kaliBerger).balance, oldBalance - 0.3 ether - unclaimed);
+        // Bob exits a portion fo deposit.
+        exit(bob, address(token_1), 1, 0.1 ether, alfred);
     } // timestamp: 6000
 
     /// @notice Bob ragequits by removing all of his deposit, triggering foreclosure.
     function testSingleBuy_ragequit() public payable {
         testSingleBuy_addDeposit();
-        vm.warp(6000);
 
         // Retrieve data for validation.
-        address impactDao = kaliBerger.getImpactDao(address(token_1), 1);
         uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
         uint256 deposit = kaliBerger.getDeposit(address(token_1), 1);
-        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
 
         // Bob withdraws all of deposit.
-        vm.prank(bob);
-        kaliBerger.exit(address(token_1), 1, deposit - patronage);
-
-        // Validate patronage amount.
-        assertEq(kaliBerger.getDeposit(address(token_1), 1), 0);
-        assertEq(token_1.balanceOf(address(kaliBerger)), 1);
-        validatePatronageToCollect(token_1, 1);
-
-        // Validate balances.
-        vm.prank(impactDao);
-        kaliBerger.claim();
-        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
-        assertEq(address(kaliBerger).balance, 0);
-        // emit log_uint(unclaimed);
-        // emit log_uint(address(impactDao).balance);
-        // emit log_uint(address(kaliBerger).balance);
-    } // timestamp: 6000
+        exit(bob, address(token_1), 1, deposit - patronage, alfred);
+    }
 
     /// @notice Charlie buys token_1, tokenId #1 and declares new price for sale.
     function testSingleBuy_secondBuy() public payable {
-        // Escrow & approve
+        // Bob buys.
         testSingleBuy();
-        vm.warp(4500);
 
-        // Retrieve data for validation.
-        address impactDao = kaliBerger.getImpactDao(address(token_1), 1);
-        uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
-        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
-
-        // Deal Charlie ether
+        // Deal Charlie ether.
         vm.deal(charlie, 10 ether);
 
-        // Charlie buys
-        vm.prank(charlie);
-        kaliBerger.buy{value: 1.3 ether}(address(token_1), 1, 1.5 ether, 1 ether);
+        // Charlie buys.
+        secondaryBuy(charlie, address(token_1), 1, 1.5 ether, alfred);
 
         // emit log_uint(oldImpactDaoBalance);
         // emit log_uint(patronage);
         // emit log_uint(address(impactDao).balance);
         // emit log_uint(address(kaliBerger).balance);
         // emit log_uint(kaliBerger.getUnclaimed(address(impactDao)));
-
-        // Validate pre-claim balance.
-        assertEq(address(kaliBerger).balance, 0.3 ether + kaliBerger.getUnclaimed(address(impactDao)));
-
-        // Validate contract balances.
-        vm.prank(impactDao);
-        kaliBerger.claim();
-        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
-        assertEq(address(charlie).balance, 8.7 ether);
-
-        // Validate ownership of Patron Certificate for token_1, #1.
-        assertEq(
-            IPatronCertificate(address(patronCertificate)).ownerOf(
-                IPatronCertificate(address(patronCertificate)).getTokenId(address(token_1), 1)
-            ),
-            charlie
-        );
-
-        // Balance DAO.
-        balanceDao(6000, address(token_1), 1, alfred);
-    } // timestamp: 6000
+    } //
 
     /// @notice After the initial purchase by Bob centuries ago, Charlie came along in year 2055 to purchase the now foreclosed token_1, #1.
     function testSingleBuy_foreclosedSecondBuy() public payable {
@@ -512,102 +568,27 @@ contract KaliBergerTest is Test {
         // Retrieve data for validation.
         address impactDao = kaliBerger.getImpactDao(address(token_1), 1);
 
-        // Deal Charlie ether.
-        vm.deal(charlie, 10 ether);
-
         // Bob defaults. Charlie buys.
-        uint256 value = 0.1 ether;
-        vm.prank(charlie);
-        kaliBerger.buy{value: value}(address(token_1), 1, 3 ether, 0);
-
-        // Validate pre-claim balance.
-        assertEq(address(kaliBerger).balance, value + kaliBerger.getUnclaimed(impactDao));
-
-        // Validate contract balances.
-        vm.prank(impactDao);
-        kaliBerger.claim();
-        assertEq(address(impactDao).balance, 0.1 ether); // ImpactDAO should have Bob's full deposit of 0.1 ether.
-        assertEq(address(charlie).balance, 9.9 ether);
-
-        // Validate ownership of Patron Certificate for token_1, #1.
-        assertEq(
-            IPatronCertificate(address(patronCertificate)).ownerOf(
-                IPatronCertificate(address(patronCertificate)).getTokenId(address(token_1), 1)
-            ),
-            charlie
-        );
-
-        // Balance DAO.
-        balanceDao(2707346509, address(token_1), 1, alfred);
+        secondaryForeclosedBuy(charlie, address(token_1), 1, 3 ether, alfred);
     } // timestamp: 2707346509
 
     /// @notice Earn buys token_1, tokenId #1 and declares new price for sale.
     function testSingleBuy_thirdBuy() public payable {
-        // Continuing from second buy by Charlie.
+        // Bob and Charlie buy.
         testSingleBuy_secondBuy();
-        vm.warp(100000);
 
-        // Retrieve data for validation.
-        address impactDao = kaliBerger.getImpactDao(address(token_1), 1);
-        uint256 patronage = kaliBerger.patronageToCollect(address(token_1), 1);
-        uint256 oldImpactDaoBalance = address(impactDao).balance + kaliBerger.getUnclaimed(impactDao); // Consider a function to aggregate all impactDao balances
-
-        // Deal Charlie ether.
-        vm.deal(earn, 10 ether);
-
-        // Charlie buys.
-        vm.prank(earn);
-        kaliBerger.buy{value: 1.6 ether}(address(token_1), 1, 5 ether, 1.5 ether);
+        // Earn buys.
+        secondaryBuy(earn, address(token_1), 1, 5 ether, alfred);
 
         // emit log_uint(oldImpactDaoBalance);
         // emit log_uint(patronage);
         // emit log_uint(address(impactDao).balance);
         // emit log_uint(address(kaliBerger).balance);
         // emit log_uint(kaliBerger.getUnclaimed(address(impactDao)));
-
-        // Validate pre-claim balance.
-        // assertEq(address(kaliBerger).balance, 0.3 ether + kaliBerger.getUnclaimed(address(impactDao)));
-
-        // Validate contract balances.
-        vm.prank(impactDao);
-        kaliBerger.claim();
-        assertEq(address(impactDao).balance, oldImpactDaoBalance + patronage);
-        assertEq(address(earn).balance, 8.4 ether);
-
-        // Validate ownership of Patron Certificate for token_1, #1.
-        assertEq(
-            IPatronCertificate(address(patronCertificate)).ownerOf(
-                IPatronCertificate(address(patronCertificate)).getTokenId(address(token_1), 1)
-            ),
-            earn
-        );
-
-        // Balance DAO.
-        balanceDao(200000, address(token_1), 1, alfred);
-    } // timestamp: 200000
-
-    /// @notice Alfred withdraws token_1, tokenId #1.
-    function testSingleBuy_pull() public payable {
-        uint256 timestamp = 10000000;
-        // Continuing from third buy by Earn.
-        testSingleBuy_thirdBuy();
-        vm.warp(timestamp);
-        // emit log_uint(timestamp);
-
-        vm.prank(alfred);
-        kaliBerger.pull(address(token_1), 1);
-
-        // Validate.
-        assertEq(token_1.balanceOf(alfred), 1);
-        assertEq(token_1.balanceOf(address(kaliBerger)), 0);
-        assertEq(kaliBerger.getPrice(address(token_1), 1), 0);
-        assertEq(kaliBerger.getDeposit(address(token_1), 1), 0);
-        assertEq(kaliBerger.getTokenPurchaseStatus(address(token_1), 1), false);
-        balanceDao(timestamp, address(token_1), 1, alfred);
-    } // timestamp: 10000000
+    } //
 
     /// -----------------------------------------------------------------------
-    /// testSingleBuy Logic - Multiple Tokens
+    /// Test Buy Logic - Multiple Tokens
     /// -----------------------------------------------------------------------
 
     /// @notice Darius buys all tokens and declares new prices for each
@@ -700,7 +681,6 @@ contract KaliBergerTest is Test {
     function testSingleBuy_setPrice_byOthers() public payable {
         // Bob buys.
         testSingleBuy();
-        vm.warp(4500);
 
         // Charlie tries to set new price on behalf of Alfred.
         vm.expectRevert(KaliBerger.NotAuthorized.selector);
@@ -712,7 +692,6 @@ contract KaliBergerTest is Test {
     function testSingleBuy_exit_invalidExit() public payable {
         // Add deposit.
         testSingleBuy_addDeposit();
-        vm.warp(5000);
 
         // InvalidExit()
         vm.expectRevert(KaliBerger.InvalidExit.selector);
@@ -724,7 +703,6 @@ contract KaliBergerTest is Test {
     function testSingleBuy_exit_byOthers() public payable {
         // Add deposit.
         testSingleBuy_addDeposit();
-        vm.warp(5000);
 
         // InvalidExit()
         vm.expectRevert(KaliBerger.NotAuthorized.selector);
@@ -734,7 +712,7 @@ contract KaliBergerTest is Test {
 
     /// @notice Alfred tries to withdraw token_1, tokenId #1 but cannot bc it has not
     ///         foreclosed yet.
-    function testSingleBuy_pull_() public payable {
+    function testSingleBuy_pull_invalidExit() public payable {
         // Continuing from third buy by Earn.
         testSingleBuy_secondBuy();
 
@@ -746,11 +724,11 @@ contract KaliBergerTest is Test {
         // Validate
         assertEq(token_1.balanceOf(alfred), 0);
         assertEq(token_1.balanceOf(address(kaliBerger)), 1);
-    } // timestamp: 5500
+    }
 
     /// @notice Earn tries to withdraw token_1, tokenId #1 on behalf of Alfred,
     /// @notice but triggers NotAuthorized() error because Alfred is the creator of NFT.
-    function testSingleBuy_pull_byOthers() public payable {
+    function testSingleBuy_pull_notAuthorized() public payable {
         uint256 timestamp = 10000000;
         // Continuing from third buy by Earn.
         testSingleBuy_thirdBuy();
