@@ -472,8 +472,8 @@ contract KaliBergerTest is Test {
     function testSingleBuy() public payable {
         // Escrow & approve
         testApprove();
-        vm.warp(block.timestamp + 1000);
 
+        // Bob buys.
         primaryBuy(bob, address(token_1), 1, 1 ether, alfred);
     }
 
@@ -527,7 +527,7 @@ contract KaliBergerTest is Test {
 
         // Bob exits a portion fo deposit.
         exit(bob, address(token_1), 1, 0.1 ether, alfred);
-    } // timestamp: 6000
+    }
 
     /// @notice Bob ragequits by removing all of his deposit, triggering foreclosure.
     function testSingleBuy_ragequit() public payable {
@@ -546,31 +546,19 @@ contract KaliBergerTest is Test {
         // Bob buys.
         testSingleBuy();
 
-        // Deal Charlie ether.
-        vm.deal(charlie, 10 ether);
-
         // Charlie buys.
         secondaryBuy(charlie, address(token_1), 1, 1.5 ether, alfred);
-
-        // emit log_uint(oldImpactDaoBalance);
-        // emit log_uint(patronage);
-        // emit log_uint(address(impactDao).balance);
-        // emit log_uint(address(kaliBerger).balance);
-        // emit log_uint(kaliBerger.getUnclaimed(address(impactDao)));
-    } //
+    }
 
     /// @notice After the initial purchase by Bob centuries ago, Charlie came along in year 2055 to purchase the now foreclosed token_1, #1.
     function testSingleBuy_foreclosedSecondBuy() public payable {
-        // Buy.
+        // Bob buys.
         testSingleBuy();
         vm.warp(2707346409);
 
-        // Retrieve data for validation.
-        address impactDao = kaliBerger.getImpactDao(address(token_1), 1);
-
         // Bob defaults. Charlie buys.
         secondaryForeclosedBuy(charlie, address(token_1), 1, 3 ether, alfred);
-    } // timestamp: 2707346509
+    }
 
     /// @notice Earn buys token_1, tokenId #1 and declares new price for sale.
     function testSingleBuy_thirdBuy() public payable {
@@ -579,13 +567,7 @@ contract KaliBergerTest is Test {
 
         // Earn buys.
         secondaryBuy(earn, address(token_1), 1, 5 ether, alfred);
-
-        // emit log_uint(oldImpactDaoBalance);
-        // emit log_uint(patronage);
-        // emit log_uint(address(impactDao).balance);
-        // emit log_uint(address(kaliBerger).balance);
-        // emit log_uint(kaliBerger.getUnclaimed(address(impactDao)));
-    } //
+    }
 
     /// -----------------------------------------------------------------------
     /// Test Buy Logic - Multiple Tokens
@@ -601,62 +583,6 @@ contract KaliBergerTest is Test {
         primaryBuy(darius, address(token_2), 1, 1 ether, bob);
         primaryBuy(darius, address(token_3), 1, 1 ether, charlie);
     }
-
-    /// @notice Darius buys all tokens and declares new prices for each
-    function testMultipleBuy_() public payable {
-        // Escrow & approve
-        testApprove();
-        vm.warp(3000);
-
-        // Deal Darius ether
-        vm.deal(darius, 10 ether);
-
-        // Darius buys
-        vm.prank(darius);
-        kaliBerger.buy{value: 0.1 ether}(address(token_1), 1, 1 ether, 0);
-        vm.prank(darius);
-        kaliBerger.buy{value: 0.1 ether}(address(token_2), 1, 1 ether, 0);
-        vm.prank(darius);
-        kaliBerger.buy{value: 0.1 ether}(address(token_3), 1, 1 ether, 0);
-        vm.warp(3100);
-
-        // Validate balances.
-        assertEq(address(kaliBerger).balance, 0.3 ether);
-        assertEq(address(darius).balance, 9.7 ether);
-
-        // Validate summoning of ImpactDAO.
-        assertEq(kaliBerger.getBergerCount(), 3);
-
-        // Validate patronage logic for calculating amount of patronage to collect.
-        validatePatronageToCollect(token_1, 1);
-        validatePatronageToCollect(token_2, 1);
-        validatePatronageToCollect(token_3, 1);
-
-        // Validate ownership of Patron Certificate for token_1, #1.
-        assertEq(
-            IPatronCertificate(address(patronCertificate)).ownerOf(
-                IPatronCertificate(address(patronCertificate)).getTokenId(address(token_1), 1)
-            ),
-            darius
-        );
-        assertEq(
-            IPatronCertificate(address(patronCertificate)).ownerOf(
-                IPatronCertificate(address(patronCertificate)).getTokenId(address(token_2), 1)
-            ),
-            darius
-        );
-        assertEq(
-            IPatronCertificate(address(patronCertificate)).ownerOf(
-                IPatronCertificate(address(patronCertificate)).getTokenId(address(token_3), 1)
-            ),
-            darius
-        );
-
-        // Balance DAO.
-        balanceDao(4000, address(token_1), 1, alfred);
-        balanceDao(4000, address(token_2), 1, bob);
-        balanceDao(4000, address(token_3), 1, charlie);
-    } // timestamp: 4000
 
     /// -----------------------------------------------------------------------
     /// Custom Error Test Logic

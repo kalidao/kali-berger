@@ -567,39 +567,39 @@ contract KaliBerger is Storage {
     /// Foreclosure Logic
     /// -----------------------------------------------------------------------
 
-    // // credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
-    // function isForeclosed(address token, uint256 tokenId) external view returns (bool, uint256) {
-    //     // returns whether it is in foreclosed state or not
-    //     // depending on whether deposit covers patronage due
-    //     // useful helper function when price should be zero, but contract doesn't reflect it yet.
-    //     uint256 toCollect = this.patronageToCollect(token, tokenId);
-    //     uint256 _deposit = this.getDeposit(token, tokenId);
-    //     if (toCollect >= _deposit) {
-    //         return (true, 0);
-    //     } else {
-    //         return (false, _deposit - toCollect);
-    //     }
-    // }
+    // credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
+    function isForeclosed(address token, uint256 tokenId) external view returns (bool, uint256) {
+        // returns whether it is in foreclosed state or not
+        // depending on whether deposit covers patronage due
+        // useful helper function when price should be zero, but contract doesn't reflect it yet.
+        uint256 toCollect = this.patronageToCollect(token, tokenId);
+        uint256 _deposit = this.getDeposit(token, tokenId);
+        if (toCollect >= _deposit) {
+            return (true, 0);
+        } else {
+            return (false, _deposit - toCollect);
+        }
+    }
 
-    // // credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
-    // function foreclosureTime(address token, uint256 tokenId) external view returns (uint256) {
-    //     uint256 pps = this.getPrice(token, tokenId) / 365 days * (this.getTax(token, tokenId) / 100);
-    //     (, uint256 daw) = this.isForeclosed(token, tokenId);
-    //     if (daw > 0) {
-    //         return block.timestamp + daw / pps;
-    //     } else if (pps > 0) {
-    //         // it is still active, but in foreclosure state
-    //         // it is block.timestamp or was in the pas
-    //         // not active and actively foreclosed (price is zero)
-    //         uint256 timeLastCollected = this.getTimeLastCollected(token, tokenId);
-    //         return timeLastCollected
-    //             + (block.timestamp - timeLastCollected) * this.getDeposit(token, tokenId)
-    //                 / this.patronageToCollect(token, tokenId);
-    //     } else {
-    //         // not active and actively foreclosed (price is zero)
-    //         return this.getTimeLastCollected(token, tokenId); // it has been foreclosed or in foreclosure.
-    //     }
-    // }
+    // credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
+    function foreclosureTime(address token, uint256 tokenId) external view returns (uint256) {
+        uint256 pps = this.getPrice(token, tokenId) / 365 days * (this.getTax(token, tokenId) / 100);
+        (, uint256 daw) = this.isForeclosed(token, tokenId);
+        if (daw > 0) {
+            return block.timestamp + daw / pps;
+        } else if (pps > 0) {
+            // it is still active, but in foreclosure state
+            // it is block.timestamp or was in the pas
+            // not active and actively foreclosed (price is zero)
+            uint256 timeLastCollected = this.getTimeLastCollected(token, tokenId);
+            return timeLastCollected
+                + (block.timestamp - timeLastCollected) * this.getDeposit(token, tokenId)
+                    / this.patronageToCollect(token, tokenId);
+        } else {
+            // not active and actively foreclosed (price is zero)
+            return this.getTimeLastCollected(token, tokenId); // it has been foreclosed or in foreclosure.
+        }
+    }
 
     /// @notice Internal function to collect patronage.
     /// @param token ERC721 token address.
