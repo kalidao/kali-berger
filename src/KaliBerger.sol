@@ -97,6 +97,9 @@ contract KaliBerger is Storage {
 
         // Transfer ERC721 back to creator
         IERC721(token).safeTransferFrom(address(this), msg.sender, tokenId);
+
+        deleteTokenPurchaseStatus(token, tokenId);
+        // TODO: Consider selfdestruct ImpactDAO
     }
 
     /// -----------------------------------------------------------------------
@@ -109,7 +112,12 @@ contract KaliBerger is Storage {
     /// @param token ERC721 token address.
     /// @param tokenId ERC721 tokenId.
     /// @param sale Confirm or reject use of Harberger Tax for escrowed ERC721.
-    function approve(address token, uint256 tokenId, bool sale, string calldata detail) external payable onlyOperator {
+    function approve(address token, uint256 tokenId, bool sale, string calldata detail)
+        external
+        payable
+        initialized
+        onlyOperator
+    {
         if (IERC721(token).ownerOf(tokenId) != address(this)) revert NotAuthorized();
         address owner = this.getCreator(token, tokenId);
 
@@ -126,7 +134,7 @@ contract KaliBerger is Storage {
             setTimeAcquired(token, tokenId, block.timestamp);
             setOwner(token, tokenId, address(this));
             if (sale) setTokenPurchaseStatus(token, tokenId, sale);
-            if (bytes(detail).length > 0) _setTokenDetail(token, tokenId, detail);
+            _setTokenDetail(token, tokenId, detail);
         }
     }
 
@@ -177,9 +185,9 @@ contract KaliBerger is Storage {
         bytes[] memory extensionsData = new bytes[](1);
         extensionsData[0] = "0x0";
 
-        // Provide KaliDAO governance settings
+        // Provide KaliDAO governance settings.
         uint32[16] memory govSettings;
-        govSettings = [uint32(300), 0, 20, 52, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+        govSettings = [uint32(86400), 0, 20, 60, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
 
         // Summon a KaliDAO
         uint256 count = this.getBergerCount();
@@ -211,6 +219,9 @@ contract KaliBerger is Storage {
     /// @param dao ImpactDAO summoned for ERC721.
     function _balance(address token, uint256 tokenId, address dao) private {
         uint256 count = this.getPatronCount(token, tokenId);
+        address creator = this.getCreator(token, tokenId);
+
+        // Balance token amount per patron.
         for (uint256 i = 1; i <= count;) {
             // Retrieve patron and patron contribution.
             address _patron = this.getPatron(token, tokenId, i);
@@ -219,21 +230,27 @@ contract KaliBerger is Storage {
             // Retrieve KaliDAO balance data.
             uint256 _contribution = IERC20(dao).balanceOf(_patron);
 
-            // Retrieve creator.
-            address creator = this.getCreator(token, tokenId);
-
             // Determine to mint or burn.
             if (contribution > _contribution) {
                 IKaliTokenManager(dao).mintTokens(creator, contribution - _contribution);
                 IKaliTokenManager(dao).mintTokens(_patron, contribution - _contribution);
             } else if (contribution < _contribution) {
-                IKaliTokenManager(dao).burnTokens(creator, _contribution - contribution);
-                IKaliTokenManager(dao).burnTokens(_patron, _contribution - contribution);
+                IKaliTokenManager(dao).burnTokens(_patron, (_contribution - contribution));
             }
 
             unchecked {
                 ++i;
             }
+        }
+
+        uint256 creatorBalance = IERC20(dao).balanceOf(creator);
+        uint256 totalCollected = this.getTotalCollected(token, tokenId);
+
+        // Balance creator token amount.
+        if (creatorBalance > totalCollected) {
+            IKaliTokenManager(dao).burnTokens(creator, creatorBalance - totalCollected);
+        } else if (totalCollected > creatorBalance) {
+            IKaliTokenManager(dao).mintTokens(creator, totalCollected - creatorBalance);
         }
     }
 
@@ -328,16 +345,37 @@ contract KaliBerger is Storage {
     /// Setter Logic
     /// -----------------------------------------------------------------------
 
-    function setKaliDaoFactory(address factory) external payable onlyOperator {
+    function setKaliDaoFactory(address factory) external payable initialized onlyOperator {
         _setAddress(keccak256(abi.encodePacked("dao.factory")), factory);
+    }
+
+    function setCertificateMinter(address factory) external payable initialized onlyOperator {
+        _setAddress(keccak256(abi.encodePacked("certificate.minter")), factory);
+    }
+
+    function setTax(address token, uint256 tokenId, uint256 _tax)
+        external
+        payable
+        initialized
+        onlyOperator
+        collectPatronage(token, tokenId)
+    {
+        if (_tax > 100) revert InvalidAmount();
+        _setUint(keccak256(abi.encode(token, tokenId, ".tax")), _tax);
+    }
+
+    function setTokenDetail(address token, uint256 tokenId, string calldata detail)
+        external
+        payable
+        initialized
+        onlyOperator
+    {
+        if (this.getOwner(token, tokenId) == address(0)) revert NotInitialized();
+        _setString(keccak256(abi.encode(token, tokenId, ".detail")), detail);
     }
 
     function _setKaliDaoFactory(address factory) internal {
         _setAddress(keccak256(abi.encodePacked("dao.factory")), factory);
-    }
-
-    function setCertificateMinter(address factory) external payable onlyOperator {
-        _setAddress(keccak256(abi.encodePacked("certificate.minter")), factory);
     }
 
     function _setCertificateMinter(address factory) internal {
@@ -348,26 +386,12 @@ contract KaliBerger is Storage {
         _setAddress(keccak256(abi.encode(token, tokenId, ".impactDao")), impactDao);
     }
 
-    function setTax(address token, uint256 tokenId, uint256 _tax)
-        external
-        payable
-        onlyOperator
-        collectPatronage(token, tokenId)
-    {
-        if (_tax > 100) revert InvalidAmount();
-        _setUint(keccak256(abi.encode(token, tokenId, ".tax")), _tax);
-    }
-
     function setCreator(address token, uint256 tokenId, address creator) internal {
         _setAddress(keccak256(abi.encode(token, tokenId, ".creator")), creator);
     }
 
-    function setTokenDetail(address token, uint256 tokenId, string calldata detail) external payable onlyOperator {
-        _setString(keccak256(abi.encode(token, tokenId, ".detail")), detail);
-    }
-
     function _setTokenDetail(address token, uint256 tokenId, string calldata detail) internal {
-        _setString(keccak256(abi.encode(token, tokenId, ".detail")), detail);
+        if (bytes(detail).length > 0) _setString(keccak256(abi.encode(token, tokenId, ".detail")), detail);
     }
 
     function setTokenPurchaseStatus(address token, uint256 tokenId, bool _forSale) internal {
@@ -537,9 +561,9 @@ contract KaliBerger is Storage {
     /// Delete Logic
     /// -----------------------------------------------------------------------
 
-    function deletePrice(address token, uint256 tokenId) internal {
-        deleteUint(keccak256(abi.encode(token, tokenId, ".price")));
-    }
+    // function deletePrice(address token, uint256 tokenId) internal {
+    //     deleteUint(keccak256(abi.encode(token, tokenId, ".price")));
+    // }
 
     function deleteDeposit(address token, uint256 tokenId) internal {
         deleteUint(keccak256(abi.encode(token, tokenId, ".deposit")));
@@ -731,7 +755,7 @@ contract KaliBerger is Storage {
         if (price != currentPrice || newPrice == 0 || currentPrice > msg.value) revert InvalidAmount();
 
         // Add purchase price to patron contribution.
-        addPatronContribution(token, tokenId, msg.sender, price);
+        // addPatronContribution(token, tokenId, msg.sender, price);
 
         // Retrieve deposit, if any.
         uint256 deposit = this.getDeposit(token, tokenId);

@@ -19,15 +19,10 @@ contract PatronCertificate {
     /// -----------------------------------------------------------------------
 
     error NotMinted();
-
     error ZeroAddress();
-
     error Unauthorized();
-
     error InvalidRecipient();
-
     error UnsafeRecipient();
-
     error AlreadyMinted();
 
     /// -----------------------------------------------------------------------
