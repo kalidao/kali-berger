@@ -331,14 +331,11 @@ contract KaliBerger is Storage {
         collectPatronage(token, tokenId)
         onlyOwner(token, tokenId)
     {
-        if (this.getDeposit(token, tokenId) >= amount) {
-            (bool success,) = msg.sender.call{value: amount}("");
-            if (!success) revert TransferFailed();
+        if (amount > this.getDeposit(token, tokenId)) revert InvalidExit();
+        (bool success,) = msg.sender.call{value: amount}("");
+        if (!success) addUnclaimed(msg.sender, amount);
 
-            subDeposit(token, tokenId, amount);
-        } else {
-            revert InvalidExit();
-        }
+        subDeposit(token, tokenId, amount);
     }
 
     /// -----------------------------------------------------------------------
