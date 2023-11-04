@@ -412,12 +412,11 @@ contract KaliBerger is Storage {
     }
 
     function setPatron(address token, uint256 tokenId, address patron) internal {
-        incrementPatronId(token, tokenId);
-        _setAddress(keccak256(abi.encode(token, tokenId, this.getPatronCount(token, tokenId))), patron);
+        _setAddress(keccak256(abi.encode(token, tokenId, ".patrons.", incrementPatronId(token, tokenId))), patron);
     }
 
     function setPatronStatus(address token, uint256 tokenId, address patron, bool status) internal {
-        _setBool(keccak256(abi.encode(token, tokenId, patron, ".isPatron")), status);
+        _setBool(keccak256(abi.encode(token, tokenId, ".isPatron.", patron)), status);
     }
 
     /// -----------------------------------------------------------------------
@@ -490,13 +489,13 @@ contract KaliBerger is Storage {
     }
 
     function getPatronCount(address token, uint256 tokenId) external view returns (uint256) {
-        return this.getUint(keccak256(abi.encode(token, tokenId, ".patronCount")));
+        return this.getUint(keccak256(abi.encode(token, tokenId, ".patrons.count")));
     }
 
     function getPatronId(address token, uint256 tokenId, address patron) external view returns (uint256) {
         uint256 count = this.getPatronCount(token, tokenId);
 
-        for (uint256 i = 0; i < count;) {
+        for (uint256 i = 0; i <= count;) {
             if (patron == this.getPatron(token, tokenId, i)) return i;
             unchecked {
                 ++i;
@@ -507,11 +506,11 @@ contract KaliBerger is Storage {
     }
 
     function isPatron(address token, uint256 tokenId, address patron) external view returns (bool) {
-        return this.getBool(keccak256(abi.encode(token, tokenId, patron, ".isPatron")));
+        return this.getBool(keccak256(abi.encode(token, tokenId, ".isPatron.", patron)));
     }
 
     function getPatron(address token, uint256 tokenId, uint256 patronId) external view returns (address) {
-        return this.getAddress(keccak256(abi.encode(token, tokenId, patronId)));
+        return this.getAddress(keccak256(abi.encode(token, tokenId, ".patrons.", patronId)));
     }
 
     function getPatronContribution(address token, uint256 tokenId, address patron) external view returns (uint256) {
@@ -550,8 +549,8 @@ contract KaliBerger is Storage {
         addUint(keccak256(abi.encodePacked("bergerTimes.count")), 1);
     }
 
-    function incrementPatronId(address token, uint256 tokenId) internal {
-        addUint(keccak256(abi.encode(token, tokenId, ".patronCount")), 1);
+    function incrementPatronId(address token, uint256 tokenId) internal returns (uint256) {
+        return addUint(keccak256(abi.encode(token, tokenId, ".patrons.count")), 1);
     }
 
     /// -----------------------------------------------------------------------
@@ -589,38 +588,38 @@ contract KaliBerger is Storage {
     /// -----------------------------------------------------------------------
 
     // credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
-    function isForeclosed(address token, uint256 tokenId) external view returns (bool, uint256) {
-        // returns whether it is in foreclosed state or not
-        // depending on whether deposit covers patronage due
-        // useful helper function when price should be zero, but contract doesn't reflect it yet.
-        uint256 toCollect = this.patronageToCollect(token, tokenId);
-        uint256 _deposit = this.getDeposit(token, tokenId);
-        if (toCollect >= _deposit) {
-            return (true, 0);
-        } else {
-            return (false, _deposit - toCollect);
-        }
-    }
+    // function isForeclosed(address token, uint256 tokenId) external view returns (bool, uint256) {
+    //     // returns whether it is in foreclosed state or not
+    //     // depending on whether deposit covers patronage due
+    //     // useful helper function when price should be zero, but contract doesn't reflect it yet.
+    //     uint256 toCollect = this.patronageToCollect(token, tokenId);
+    //     uint256 _deposit = this.getDeposit(token, tokenId);
+    //     if (toCollect >= _deposit) {
+    //         return (true, 0);
+    //     } else {
+    //         return (false, _deposit - toCollect);
+    //     }
+    // }
 
     // credit: simondlr  https://github.com/simondlr/thisartworkisalwaysonsale/blob/master/packages/hardhat/contracts/v1/ArtStewardV2.sol
-    function foreclosureTime(address token, uint256 tokenId) external view returns (uint256) {
-        uint256 pps = this.getPrice(token, tokenId) / 365 days * (this.getTax(token, tokenId) / 100);
-        (, uint256 daw) = this.isForeclosed(token, tokenId);
-        if (daw > 0) {
-            return block.timestamp + daw / pps;
-        } else if (pps > 0) {
-            // it is still active, but in foreclosure state
-            // it is block.timestamp or was in the pas
-            // not active and actively foreclosed (price is zero)
-            uint256 timeLastCollected = this.getTimeLastCollected(token, tokenId);
-            return timeLastCollected
-                + (block.timestamp - timeLastCollected) * this.getDeposit(token, tokenId)
-                    / this.patronageToCollect(token, tokenId);
-        } else {
-            // not active and actively foreclosed (price is zero)
-            return this.getTimeLastCollected(token, tokenId); // it has been foreclosed or in foreclosure.
-        }
-    }
+    // function foreclosureTime(address token, uint256 tokenId) external view returns (uint256) {
+    //     uint256 pps = this.getPrice(token, tokenId) / 365 days * (this.getTax(token, tokenId) / 100);
+    //     (, uint256 daw) = this.isForeclosed(token, tokenId);
+    //     if (daw > 0) {
+    //         return block.timestamp + daw / pps;
+    //     } else if (pps > 0) {
+    //         // it is still active, but in foreclosure state
+    //         // it is block.timestamp or was in the pas
+    //         // not active and actively foreclosed (price is zero)
+    //         uint256 timeLastCollected = this.getTimeLastCollected(token, tokenId);
+    //         return timeLastCollected
+    //             + (block.timestamp - timeLastCollected) * this.getDeposit(token, tokenId)
+    //                 / this.patronageToCollect(token, tokenId);
+    //     } else {
+    //         // not active and actively foreclosed (price is zero)
+    //         return this.getTimeLastCollected(token, tokenId); // it has been foreclosed or in foreclosure.
+    //     }
+    // }
 
     /// @notice Internal function to collect patronage.
     /// @param token ERC721 token address.

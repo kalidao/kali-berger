@@ -152,7 +152,7 @@ contract KaliBergerTest is Test {
         escrow(alfred, token_1, 1);
         escrow(bob, token_2, 1);
         escrow(charlie, token_3, 1);
-    } // 300
+    }
 
     /// @notice DAO approves all tokens for purchase and adds custom detail.
     function testApprove() public payable {
@@ -226,8 +226,6 @@ contract KaliBergerTest is Test {
     /// -----------------------------------------------------------------------
     /// Buy Test - Single Token
     /// -----------------------------------------------------------------------
-
-    // TODO: Tests for getTimeHeld(), getPatronId(), isPatron()
 
     /// @notice Bob buys token_1, tokenId #1 and declares a new price for sale
     function testSingleBuy() public payable {
@@ -350,7 +348,7 @@ contract KaliBergerTest is Test {
         mintImpactDaoTokens(KaliDAO(impactDao), alfred, alfred, 100 ether);
 
         // Balance.
-        emit log_uint(block.timestamp);
+        // emit log_uint(block.timestamp);
         balanceDao(block.timestamp + 20000, address(token_1), 1, alfred);
     }
 
@@ -364,8 +362,38 @@ contract KaliBergerTest is Test {
         mintImpactDaoTokens(KaliDAO(impactDao), alfred, bob, 100 ether);
 
         // Balance.
-        emit log_uint(block.timestamp);
+        // emit log_uint(block.timestamp);
         balanceDao(block.timestamp + 20000, address(token_1), 1, alfred);
+    }
+
+    /// -----------------------------------------------------------------------
+    /// Getter Test
+    /// -----------------------------------------------------------------------
+
+    function testGetTimeHeld() public payable {
+        testSingleBuy_thirdBuy();
+        vm.warp(block.timestamp + 10000);
+
+        assertEq(kaliBerger.getTimeHeld(bob), 2000);
+        assertEq(kaliBerger.getTimeHeld(charlie), 2000);
+    }
+
+    function testGetPatronId() public payable {
+        testSingleBuy_thirdBuy();
+
+        assertEq(kaliBerger.getPatronId(address(token_1), 1, bob), 1);
+        assertEq(kaliBerger.getPatronId(address(token_1), 1, charlie), 2);
+        assertEq(kaliBerger.getPatronId(address(token_1), 1, earn), 3);
+        assertEq(kaliBerger.getPatronId(address(token_1), 1, darius), 0);
+    }
+
+    function testIsPatron() public payable {
+        testSingleBuy_thirdBuy();
+
+        assertEq(kaliBerger.isPatron(address(token_1), 1, bob), true);
+        assertEq(kaliBerger.isPatron(address(token_1), 1, charlie), true);
+        assertEq(kaliBerger.isPatron(address(token_1), 1, darius), false);
+        assertEq(kaliBerger.isPatron(address(token_1), 1, earn), true);
     }
 
     /// -----------------------------------------------------------------------
@@ -560,11 +588,11 @@ contract KaliBergerTest is Test {
         if (creator == alfred) assertEq(creator_balance, bob_balance + charlie_balance + earn_balance + darius_balance);
         if (creator == bob) assertEq(creator_balance, alfred_balance + charlie_balance + earn_balance + darius_balance);
         if (creator == charlie) assertEq(creator_balance, alfred_balance + bob_balance + earn_balance + darius_balance);
-        emit log_uint(alfred_balance);
-        emit log_uint(bob_balance);
-        emit log_uint(charlie_balance);
-        emit log_uint(darius_balance);
-        emit log_uint(earn_balance);
+        // emit log_uint(alfred_balance);
+        // emit log_uint(bob_balance);
+        // emit log_uint(charlie_balance);
+        // emit log_uint(darius_balance);
+        // emit log_uint(earn_balance);
     }
 
     /// @notice Buy ERC721.
