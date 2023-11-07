@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity >=0.8.4;
 
-import {LibString} from "../lib/solbase/src/utils/LibString.sol";
-import {IERC721} from "../lib/forge-std/src/interfaces/IERC721.sol";
-import {IERC20} from "../lib/forge-std/src/interfaces/IERC20.sol";
+import {LibString} from "solbase/utils/LibString.sol";
+import {IERC721} from "forge-std/interfaces/IERC721.sol";
+import {IERC20} from "forge-std/interfaces/IERC20.sol";
 
 import {IStorage} from "./interface/IStorage.sol";
 import {Storage} from "./Storage.sol";

@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity >=0.8.4;
 
-// import {SafeMulticallable} from "solbase/utils/SafeMulticallable.sol";
-import {IStorage} from "src/interface/IStorage.sol";
-
 /// @notice An extensible DAO-managed storage
 /// @author audsssy.eth
 /// credit: inspired by RocketPool (https://github.com/rocket-pool/rocketpool/blob/6a9dbfd85772900bb192aabeb0c9b8d9f6e019d1/contracts/contract/RocketStorage.sol)
