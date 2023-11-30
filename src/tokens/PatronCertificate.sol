@@ -3,7 +3,7 @@ pragma solidity ^0.8.4;
 
 import {SVG} from "../utils/SVG.sol";
 import {JSON} from "../utils/JSON.sol";
-import {Base64} from "../../lib/solbase/src/utils/Base64.sol";
+import {Base64} from "solbase/utils/Base64.sol";
 
 /// @notice Modified Solbase ERC721 with minter-only transfers.
 /// @author Modified from Solmate (https://github.com/transmissions11/solmate/blob/main/src/tokens/ERC721.sol)
