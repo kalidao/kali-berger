@@ -23,6 +23,7 @@ contract KaliCurve is Storage {
     error NotAuthorized();
     error TransferFailed();
     error NotInitialized();
+    error InvalidCurveParam();
     error InvalidAmount();
     error InvalidMint();
     error InvalidBurn();
@@ -34,7 +35,7 @@ contract KaliCurve is Storage {
     function initialize(address dao, address daoFactory) external {
         if (daoFactory != address(0)) {
             init(dao);
-            setKaliDaoFactory(daoFactory);
+            _setKaliDaoFactory(daoFactory);
         }
     }
 
@@ -53,7 +54,7 @@ contract KaliCurve is Storage {
     }
 
     modifier forSale(uint256 curveId) {
-        if (!this.getCurveMintStatus(curveId)) revert NotInitialized();
+        if (!this.getCurveMintStatus(curveId)) revert NotAuthorized();
         _;
     }
 
@@ -63,14 +64,15 @@ contract KaliCurve is Storage {
 
     /// @notice Configure a curve.
     function curve(
-        address owner,
         uint256 curveId,
+        address owner,
         CurveType curveType,
         uint256 minSupplyToBurn,
         uint256 constant_a,
         uint256 constant_b,
         uint256 constant_c,
-        bool sale,
+        bool canMint,
+        bool hasTreasury,
         string calldata detail
     ) external payable returns (uint256) {
         // Setup new curve.
@@ -84,24 +86,27 @@ contract KaliCurve is Storage {
             // Initialize curve type.
             setCurveType(curveId, curveType);
 
-            // Initialize curve type.
+            // Initialize curve constant.
             _setMintConstantA(curveId, constant_a);
 
-            // Initialize curve type.
+            // Initialize curve constant.
             _setMintConstantB(curveId, constant_b);
 
-            // Initialize curve type.
+            // Initialize curve constant.
             _setMintConstantC(curveId, constant_c);
 
             // Initialize minimum supply required before burn is activated.
             setCurveMinSupplyToBurn(curveId, minSupplyToBurn);
         }
 
-        // Set sale status.
-        if (sale != this.getCurveMintStatus(curveId)) _setCurveMintStatus(curveId, sale);
+        // Set mint status.
+        _setCurveMintStatus(curveId, canMint);
 
-        // Set any detail.
-        if (bytes(detail).length > 0) _setCurveDetail(curveId, detail);
+        // Set treasury status.
+        _setCurveTreasuryStatus(curveId, hasTreasury);
+
+        // Set detail.
+        _setCurveDetail(curveId, detail);
 
         return curveId;
     }
@@ -118,9 +123,9 @@ contract KaliCurve is Storage {
 
         // Provide respective token amount.
         uint256[] memory tokens = new uint256[](1);
-        tokens[0] = 1;
+        tokens[0] = 1 ether;
 
-        // Have ImpactDAO hooked up to KaliCurve at start so that KaliCurve may mint/burn tokens on behalf of ImpactDAO.
+        // Set KaliCurve as an extension to ImpactDAO.
         address[] memory extensions = new address[](1);
         extensions[0] = address(this);
         bytes[] memory extensionsData = new bytes[](1);
@@ -128,7 +133,7 @@ contract KaliCurve is Storage {
 
         // Provide KaliDAO governance settings.
         uint32[16] memory govSettings;
-        govSettings = [uint32(300), 0, 20, 52, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+        govSettings = [uint32(604800), 0, 55, 60, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
 
         // Summon a KaliDAO
         uint256 count = this.getCurveCount();
@@ -146,7 +151,7 @@ contract KaliCurve is Storage {
             )
         );
 
-        // Store dao address for future.
+        // Store dao address for future ref.
         setImpactDao(curveId, impactDao);
         return impactDao;
     }
@@ -170,10 +175,9 @@ contract KaliCurve is Storage {
     /// Patron Logic
     /// -----------------------------------------------------------------------
 
-    /// @notice Mint patron certificate.
-    function mint(uint256 curveId, address patron) external payable initialized forSale(curveId) {
+    /// @notice Buy ImpactDAO tokens.
+    function buy(uint256 curveId, address patron) external payable initialized forSale(curveId) {
         // Retrieve current supply and mint price.
-
         uint256 supply = incrementCurveSupply(curveId);
         uint256 mintPrice = _getMintPrice(curveId, supply);
 
@@ -183,53 +187,63 @@ contract KaliCurve is Storage {
 
         // Retrieve current burn price.
         uint256 burnPrice = _getBurnPrice(curveId, supply);
+        uint256 price = mintPrice - burnPrice;
 
-        // Retrieve impactDAO.
+        // Retrieve ImpactDAO.
         address impactDAO = this.getImpactDao(curveId);
 
-        // Send price difference to impactDAO.
-        (bool success,) = impactDAO.call{value: mintPrice - burnPrice}("");
-        if (success) revert TransferFailed();
+        // If ImpactDAO does not exist, summon one for curve owner and patron.
+        if (impactDAO == address(0)) impactDAO = summonDao(curveId, patron);
 
-        // If impactDAO does not exist, summon one with owner and patron both holding one impactDAO token.
-        if (impactDAO == address(0)) {
-            impactDAO = summonDao(curveId, patron);
+        // Regardless of number of buys, each Patron receives one ether amount of ImpactDAO tokens only.
+        if (IKaliTokenManager(impactDAO).balanceOf(patron) == 0) {
+            IKaliTokenManager(impactDAO).mintTokens(this.getOwner(curveId), 1 ether);
+            IKaliTokenManager(impactDAO).mintTokens(patron, 1 ether);
+        }
+
+        // Distribute trading fee.
+        if (this.getCurveTreasuryStatus(curveId)) {
+            addUnclaimed(this.getOwner(curveId), price);
         } else {
-            // If impactDAO does exist, mint one impactDAO token to owner and another to patron, only if patron does not already have one.
-            if (IKaliTokenManager(impactDAO).balanceOf(patron) == 0) {
-                IKaliTokenManager(impactDAO).mintTokens(this.getOwner(curveId), 1);
-                IKaliTokenManager(impactDAO).mintTokens(patron, 1);
-            }
+            // Send price difference to ImpactDAO.
+            (bool success,) = impactDAO.call{value: price}("");
+            if (!success) addUnclaimed(impactDAO, price);
         }
     }
 
-    /// @notice Burn Patron Certificate.
-    function burn(uint256 curveId, address patron) external payable initialized {
-        // Retrieve impactDAO and check if patron is eligible.
+    /// @notice Burn ImpactDAO tokens.
+    function relinquish(uint256 curveId, address patron) external payable initialized {
+        // Retrieve ImpactDAO and check if patron is eligible.
         address impactDAO = this.getImpactDao(curveId);
         if (IKaliTokenManager(impactDAO).balanceOf(patron) == 0) revert InvalidBurn();
 
         // Retrieve current burn price.
-
         uint256 supply = this.getCurveSupply(curveId);
-        (supply > 1) ? supply = decrementCurveSupply(curveId) : supply = 0;
         uint256 price = _getBurnPrice(curveId, supply);
+        // TODO: is this necessary
         if (price == 0) revert InvalidBurn();
 
-        // Send price to burn to patron.
-        (bool success,) = patron.call{value: price}("");
-        if (success) addUnclaimed(patron, price);
+        // Decrement supply.
+        decrementCurveSupply(curveId);
 
-        // Burn patron certificate.
-        IKaliTokenManager(impactDAO).burnTokens(this.getOwner(curveId), 1);
-        IKaliTokenManager(impactDAO).burnTokens(patron, 1);
+        // Send burn price to patron.
+        (bool success,) = patron.call{value: price}("");
+        if (!success) addUnclaimed(patron, price);
+
+        // Burn ImpactDAO tokens.
+        IKaliTokenManager(impactDAO).burnTokens(this.getOwner(curveId), 1 ether);
+        IKaliTokenManager(impactDAO).burnTokens(patron, 1 ether);
     }
 
     /// -----------------------------------------------------------------------
     /// Setter Logic
     /// -----------------------------------------------------------------------
 
-    function setKaliDaoFactory(address factory) internal {
+    function setKaliDaoFactory(address factory) external payable initialized onlyOperator {
+        _setKaliDaoFactory(factory);
+    }
+
+    function _setKaliDaoFactory(address factory) internal {
         _setAddress(keccak256(abi.encodePacked("dao.factory")), factory);
     }
 
@@ -238,6 +252,7 @@ contract KaliCurve is Storage {
     }
 
     function setOwner(uint256 curveId, address owner) internal {
+        if (owner == address(0)) revert NotAuthorized();
         _setAddress(keccak256(abi.encode(curveId, ".owner")), owner);
     }
 
@@ -273,8 +288,12 @@ contract KaliCurve is Storage {
         _setBurnConstantC(curveId, constant_c);
     }
 
-    function setCurveMintStatus(uint256 curveId, bool sale) external payable onlyOwner(curveId) {
-        _setBool(keccak256(abi.encode(curveId, ".forSale")), sale);
+    function setCurveMintStatus(uint256 curveId, bool canMint) external payable onlyOwner(curveId) {
+        _setCurveMintStatus(curveId, canMint);
+    }
+
+    function setCurveTreasuryStatus(uint256 curveId, bool hasTreasury) external payable onlyOwner(curveId) {
+        _setCurveTreasuryStatus(curveId, hasTreasury);
     }
 
     function setCurveType(uint256 curveId, CurveType curveType) internal {
@@ -282,21 +301,29 @@ contract KaliCurve is Storage {
     }
 
     function _setCurveDetail(uint256 curveId, string calldata detail) internal {
-        _setString(keccak256(abi.encode(curveId, ".detail")), detail);
+        if (bytes(detail).length > 0) _setString(keccak256(abi.encode(curveId, ".detail")), detail);
     }
 
     function setCurveMinSupplyToBurn(uint256 curveId, uint256 minSupplyToBurn) internal {
         _setUint(keccak256(abi.encode(curveId, ".,minSupplyToBurn")), minSupplyToBurn);
     }
 
-    function _setCurveMintStatus(uint256 curveId, bool sale) internal {
-        _setBool(keccak256(abi.encode(curveId, ".forSale")), sale);
+    function _setCurveMintStatus(uint256 curveId, bool canMint) internal {
+        if (canMint != this.getCurveMintStatus(curveId)) _setBool(keccak256(abi.encode(curveId, ".canMint")), canMint);
+    }
+
+    function _setCurveTreasuryStatus(uint256 curveId, bool hasTreasury) internal {
+        if (hasTreasury != this.getCurveTreasuryStatus(curveId)) {
+            _setBool(keccak256(abi.encode(curveId, ".hasTreasury")), hasTreasury);
+        }
     }
 
     function _setMintConstantA(uint256 curveId, uint256 constant_a) internal {
         // To prevent future calculation errors, such as arithmetic overflow/underflow.
         if (constant_a - this.getBurnConstantA(curveId) >= 0) {
             _setUint(keccak256(abi.encode(curveId, ".mint.a")), constant_a);
+        } else {
+            revert InvalidCurveParam();
         }
     }
 
@@ -304,6 +331,8 @@ contract KaliCurve is Storage {
         // To prevent future calculation errors, such as arithmetic overflow/underflow.
         if (constant_b - this.getBurnConstantB(curveId) >= 0) {
             _setUint(keccak256(abi.encode(curveId, ".mint.b")), constant_b);
+        } else {
+            revert InvalidCurveParam();
         }
     }
 
@@ -311,6 +340,8 @@ contract KaliCurve is Storage {
         // To prevent future calculation errors, such as arithmetic overflow/underflow.
         if (constant_c - this.getBurnConstantC(curveId) >= 0) {
             _setUint(keccak256(abi.encode(curveId, ".mint.c")), constant_c);
+        } else {
+            revert InvalidCurveParam();
         }
     }
 
@@ -318,6 +349,8 @@ contract KaliCurve is Storage {
         // To prevent future calculation errors, such as arithmetic overflow/underflow.
         if (this.getMintConstantA(curveId) - constant_a >= 0) {
             _setUint(keccak256(abi.encode(curveId, ".burn.a")), constant_a);
+        } else {
+            revert InvalidCurveParam();
         }
     }
 
@@ -325,6 +358,8 @@ contract KaliCurve is Storage {
         // To prevent future calculation errors, such as arithmetic overflow/underflow.
         if (this.getMintConstantB(curveId) - constant_b >= 0) {
             _setUint(keccak256(abi.encode(curveId, ".burn.b")), constant_b);
+        } else {
+            revert InvalidCurveParam();
         }
     }
 
@@ -332,6 +367,8 @@ contract KaliCurve is Storage {
         // To prevent future calculation errors, such as arithmetic overflow/underflow.
         if (this.getMintConstantC(curveId) - constant_c >= 0) {
             _setUint(keccak256(abi.encode(curveId, ".burn.c")), constant_c);
+        } else {
+            revert InvalidCurveParam();
         }
     }
     /// -----------------------------------------------------------------------
@@ -363,7 +400,11 @@ contract KaliCurve is Storage {
     }
 
     function getCurveMintStatus(uint256 curveId) external view returns (bool) {
-        return this.getBool(keccak256(abi.encode(curveId, ".forSale")));
+        return this.getBool(keccak256(abi.encode(curveId, ".canMint")));
+    }
+
+    function getCurveTreasuryStatus(uint256 curveId) external view returns (bool) {
+        return this.getBool(keccak256(abi.encode(curveId, ".hasTreasury")));
     }
 
     function getCurveType(uint256 curveId) external view returns (CurveType) {
@@ -415,10 +456,10 @@ contract KaliCurve is Storage {
 
         // Return linear pricing based on, a * b * x + b.
         if (curveType == CurveType.LINEAR) {
-            return constant_a * constant_b * supply + constant_b;
+            return constant_a * supply + constant_b;
         } else {
             // Return curve pricing based on, a * c * x^2 + b * c * x + c.
-            return constant_a * constant_c * (supply ** 2) + constant_b * constant_c * supply + constant_c;
+            return constant_a * (supply ** 2) + constant_b * supply + constant_c;
         }
     }
 
