@@ -57,8 +57,8 @@ contract KaliCurve is Storage {
         _;
     }
 
-    modifier forSale(uint256 curveId) {
-        if (!this.getCurveMintStatus(curveId)) revert NotAuthorized();
+    modifier isOpen(uint256 curveId) {
+        if (curveId == 0 || !this.getCurveMintStatus(curveId)) revert InvalidMint();
         _;
     }
 
@@ -167,7 +167,7 @@ contract KaliCurve is Storage {
     /// -----------------------------------------------------------------------
 
     /// @notice Donate to receive ImpactDAO tokens.
-    function donate(uint256 curveId, address patron, uint256 donation) external payable initialized forSale(curveId) {
+    function donate(uint256 curveId, address patron, uint256 donation) external payable initialized isOpen(curveId) {
         // Retrieve ImpactDAO and curve owner.
         uint256 totalDonation;
         address impactDAO = this.getImpactDao(curveId);
@@ -176,7 +176,6 @@ contract KaliCurve is Storage {
         // Validate mint conditions.
         uint256 burnPrice = this.getPrice(false, curveId);
         if (donation != this.getPrice(true, curveId) || donation < burnPrice) revert InvalidAmount();
-        if (curveId == 0 || !this.getCurveMintStatus(curveId)) revert InvalidMint();
         if (msg.sender == owner) revert NotAuthorized();
 
         // Confirm ImpactDAO exists.
@@ -214,16 +213,15 @@ contract KaliCurve is Storage {
         address impactDAO = this.getImpactDao(curveId);
         if (IKaliTokenManager(impactDAO).balanceOf(patron) == 0) revert InvalidBurn();
 
-        // Decrement supply.
-        decrementCurveSupply(curveId);
-
-        // Send burn price to patron.
-        (bool success,) = patron.call{value: this.getPrice(false, curveId)}("");
-        if (!success) addUnclaimed(patron, this.getPrice(false, curveId));
+        // Add burn price to patron's unclaimed.
+        addUnclaimed(patron, this.getPrice(false, curveId));
 
         // Burn ImpactDAO tokens.
         IKaliTokenManager(impactDAO).burnTokens(this.getCurveOwner(curveId), 1 ether);
         IKaliTokenManager(impactDAO).burnTokens(patron, 1 ether);
+
+        // Decrement supply.
+        decrementCurveSupply(curveId);
     }
 
     /// -----------------------------------------------------------------------

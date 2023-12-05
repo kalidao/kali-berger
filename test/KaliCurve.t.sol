@@ -109,13 +109,7 @@ contract KaliCurveTest is Test {
         assertEq(_constant_c, uint48(0));
     }
 
-    function testCurveWithDaoTreasury_SetCurveData_NotOwner(
-        uint96 scale,
-        uint16 ratio,
-        uint48 constant_a,
-        uint48 constant_b,
-        uint48 constant_c
-    ) public payable {
+    function testCurveWithDaoTreasury_SetCurveData_NotOwner() public payable {
         testCurveWithDaoTreasury();
         vm.warp(block.timestamp + 100);
 
@@ -133,9 +127,7 @@ contract KaliCurveTest is Test {
 
         bool status = kaliCurve.getCurveMintStatus(1);
 
-        vm.prank(alice);
-        kaliCurve.setCurveMintStatus(1, !status);
-        assertEq(kaliCurve.getCurveMintStatus(1), !status);
+        setMintStatus(alice, 1, !status);
     }
 
     function testCurveWithDaoTreasury_SetCurveMintStatus_NotOwner(bool status) public payable {
@@ -288,7 +280,6 @@ contract KaliCurveTest is Test {
         vm.warp(block.timestamp + 100);
 
         uint256 amount = kaliCurve.getPrice(true, kaliCurve.getCurveCount());
-        emit log_uint(amount);
 
         vm.deal(bob, 10 ether);
         vm.prank(bob);
@@ -298,13 +289,111 @@ contract KaliCurveTest is Test {
         // assertEq();
     }
 
-    function testDonate_NotInitialized() public payable {}
+    function testDonateWithDaoTreasury_NotInitialized() public payable {
+        vm.expectRevert(KaliCurve.NotInitialized.selector);
+        vm.prank(dao);
+        kaliCurve.donate(1, alice, 1 ether);
+    }
 
     function testDonate_NotAuthorized() public payable {}
 
-    function testDonate_InvalidMint() public payable {}
+    function testDonateWithDaoTreasury_InvalidMint_NotOpen() public payable {
+        testCurveWithDaoTreasury();
+        vm.warp(block.timestamp + 100);
 
-    function testLeave() public payable {}
+        setMintStatus(alice, 1, false);
+
+        vm.deal(bob, 10 ether);
+        vm.expectRevert(KaliCurve.InvalidMint.selector);
+        vm.prank(bob);
+        kaliCurve.donate(1, bob, 1 ether);
+    }
+
+    function testDonateWithDaoTreasury_InvalidMint_CurveZero() public payable {
+        testCurveWithDaoTreasury();
+        vm.warp(block.timestamp + 100);
+
+        vm.deal(bob, 10 ether);
+        vm.expectRevert(KaliCurve.InvalidMint.selector);
+        vm.prank(bob);
+        kaliCurve.donate(0, bob, 1 ether);
+    }
+
+    function testDonateWithDaoTreasury_InvalidAmount() public payable {
+        testCurveWithDaoTreasury();
+        vm.warp(block.timestamp + 100);
+        uint256 amount = kaliCurve.getPrice(true, kaliCurve.getCurveCount());
+
+        vm.deal(bob, 10 ether);
+        vm.expectRevert(KaliCurve.InvalidAmount.selector);
+        vm.prank(bob);
+        kaliCurve.donate(1, bob, amount + 1 ether);
+    }
+
+    // todo: try to refactor this beast
+    // todo: and add custom errors tests
+    function testLeave_NewUsers() public payable {
+        testDonateWithDaoTreasury_NewUsers();
+
+        uint256 supply = kaliCurve.getCurveSupply(1);
+        address impactDao = kaliCurve.getImpactDao(1);
+        uint256 burnPrice = kaliCurve.getPrice(false, 1);
+
+        // Bob leaves.
+        vm.prank(bob);
+        kaliCurve.leave(1, bob);
+
+        // Validate.
+        assertEq(IKaliTokenManager(impactDao).balanceOf(bob), 0);
+        assertEq(kaliCurve.getCurveSupply(1), supply - 1);
+        assertEq(kaliCurve.getUnclaimed(bob), burnPrice);
+
+        // Bob claims funds.
+        uint256 bobBalance = address(bob).balance;
+        vm.prank(bob);
+        kaliCurve.claim();
+        assertEq(address(bob).balance, bobBalance + burnPrice);
+
+        uint256 _burnPrice = kaliCurve.getPrice(false, 1);
+
+        // Charlie leaves.
+        vm.prank(charlie);
+        kaliCurve.leave(1, charlie);
+
+        // Validate.
+        assertEq(IKaliTokenManager(impactDao).balanceOf(charlie), 0);
+        assertEq(kaliCurve.getCurveSupply(1), supply - 2);
+        assertEq(kaliCurve.getUnclaimed(charlie), _burnPrice);
+
+        // Charlie claims funds.
+        uint256 charlieBalance = address(charlie).balance;
+        vm.prank(charlie);
+        kaliCurve.claim();
+        assertEq(address(charlie).balance, charlieBalance + _burnPrice);
+    }
+
+    function testLeave_RecurringUser() public payable {
+        testDonateWithDaoTreasury_RecurringUser();
+
+        uint256 supply = kaliCurve.getCurveSupply(1);
+        address impactDao = kaliCurve.getImpactDao(1);
+
+        vm.prank(charlie);
+        kaliCurve.leave(1, charlie);
+
+        // Validate.
+        assertEq(IKaliTokenManager(impactDao).balanceOf(charlie), 0);
+        assertEq(kaliCurve.getCurveSupply(1), supply - 1);
+    }
+
+    function testLeave_InvalidBurn() public payable {
+        testLeave_RecurringUser();
+
+        //  Charlies tries to leave again.
+        vm.expectRevert(KaliCurve.InvalidBurn.selector);
+        vm.prank(charlie);
+        kaliCurve.leave(1, charlie);
+    }
 
     /// -----------------------------------------------------------------------
     /// Fuzzy Curve Test
@@ -377,10 +466,6 @@ contract KaliCurveTest is Test {
         assertEq(_constant_b, constant_b);
         assertEq(_constant_c, constant_c);
     }
-
-    /// -----------------------------------------------------------------------
-    /// Getter Test
-    /// -----------------------------------------------------------------------
 
     /// -----------------------------------------------------------------------
     /// Custom Error Test
@@ -464,23 +549,29 @@ contract KaliCurveTest is Test {
         uint256 constant_b,
         uint256 constant_c
     ) internal returns (uint256) {
-        uint256 price;
+        uint256 _price;
 
         supply = mint ? supply + 1 : supply;
         burnRatio = mint ? 100 : uint256(100) - burnRatio;
 
         if (curveType == CurveType.LINEAR) {
             // Return linear pricing based on, a * b * x + b.
-            price = (constant_a * supply * scale + constant_b * scale) * burnRatio / 100;
+            _price = (constant_a * supply * scale + constant_b * scale) * burnRatio / 100;
         } else if (curveType == CurveType.CURVE) {
             // Return curve pricing based on, a * c * x^2 + b * c * x + c.
-            price = (constant_a * (supply ** 2) * scale + constant_b * supply * scale + constant_c * scale) * burnRatio
+            _price = (constant_a * (supply ** 2) * scale + constant_b * supply * scale + constant_c * scale) * burnRatio
                 / 100;
         } else {
-            price = 0;
+            _price = 0;
         }
 
-        emit log_uint(price);
-        return price;
+        emit log_uint(_price);
+        return _price;
+    }
+
+    function setMintStatus(address user, uint256 curveId, bool status) internal {
+        vm.prank(user);
+        kaliCurve.setCurveMintStatus(curveId, status);
+        assertEq(kaliCurve.getCurveMintStatus(curveId), status);
     }
 }
