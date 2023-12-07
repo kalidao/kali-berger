@@ -154,7 +154,7 @@ contract KaliCurve is Storage {
     /// @notice Claim tax revenue and unsuccessful transfers.
     function claim() external payable {
         uint256 amount = this.getUnclaimed(msg.sender);
-        if (amount == 0) revert InvalidAmount();
+        if (amount == 0) revert NotAuthorized();
 
         deleteUnclaimed(msg.sender);
 
@@ -356,7 +356,7 @@ contract KaliCurve is Storage {
         if (curveType == CurveType.LINEAR) {
             // Return linear pricing based on, a * b * x + b.
             return (constant_a * supply * scale + constant_b * scale) * burnRatio / 100;
-        } else if (curveType == CurveType.CURVE) {
+        } else if (curveType == CurveType.POLY) {
             // Return curve pricing based on, a * c * x^2 + b * c * x + c.
             return (constant_a * (supply ** 2) * scale + constant_b * supply * scale + constant_c * scale) * burnRatio
                 / 100;
