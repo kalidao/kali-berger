@@ -20,6 +20,22 @@ contract KaliCurve is Storage {
     /// Events
     /// -----------------------------------------------------------------------
 
+    event Donated(uint256 curveId, address patron, uint256 donation, uint256 curveSupply);
+    event Left(uint256 curveId, address patron, uint256 curveSupply);
+    event CurveCreated(
+        uint256 curveId,
+        CurveType curveType,
+        bool canMint,
+        bool daoTreasury,
+        address owner,
+        uint96 scale,
+        uint16 burnRatio,
+        uint48 constant_a,
+        uint48 constant_b,
+        uint48 constant_c
+    );
+    event ImpactDaoSummoned(address dao);
+
     /// -----------------------------------------------------------------------
     /// Custom Error
     /// -----------------------------------------------------------------------
@@ -98,6 +114,10 @@ contract KaliCurve is Storage {
 
         // Increment curve supply to start at 1.
         incrementCurveSupply(curveId);
+
+        emit CurveCreated(
+            curveId, curveType, canMint, daoTreasury, owner, scale, burnRatio, constant_a, constant_b, constant_c
+            );
     }
 
     /// -----------------------------------------------------------------------
@@ -204,7 +224,8 @@ contract KaliCurve is Storage {
         addUnclaimed(this.getCurveTreasury(curveId) ? impactDAO : owner, totalDonation);
 
         // Increment curve supply.
-        incrementCurveSupply(curveId);
+
+        emit Donated(curveId, patron, donation, incrementCurveSupply(curveId));
     }
 
     /// @notice Burn ImpactDAO tokens.
@@ -221,7 +242,9 @@ contract KaliCurve is Storage {
         IKaliTokenManager(impactDAO).burnTokens(patron, 1 ether);
 
         // Decrement supply.
-        decrementCurveSupply(curveId);
+        // uint256 supply = ;
+
+        emit Left(curveId, patron, decrementCurveSupply(curveId));
     }
 
     /// -----------------------------------------------------------------------
@@ -288,6 +311,8 @@ contract KaliCurve is Storage {
     /// @notice .
     function setImpactDao(uint256 curveId, address impactDao) internal {
         _setAddress(keccak256(abi.encode(curveId, ".impactDao")), impactDao);
+
+        emit ImpactDaoSummoned(impactDao);
     }
 
     /// -----------------------------------------------------------------------
@@ -395,13 +420,13 @@ contract KaliCurve is Storage {
     }
 
     /// @notice Internal function to increment supply of a curve.
-    function incrementCurveSupply(uint256 curveId) internal {
-        addUint(keccak256(abi.encode(curveId, ".supply")), 1);
+    function incrementCurveSupply(uint256 curveId) internal returns (uint256) {
+        return addUint(keccak256(abi.encode(curveId, ".supply")), 1);
     }
 
     /// @notice Internal function to decrement supply of a curve.
-    function decrementCurveSupply(uint256 curveId) internal {
-        subUint(keccak256(abi.encode(curveId, ".supply")), 1);
+    function decrementCurveSupply(uint256 curveId) internal returns (uint256) {
+        return subUint(keccak256(abi.encode(curveId, ".supply")), 1);
     }
 
     /// -----------------------------------------------------------------------

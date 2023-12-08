@@ -348,7 +348,6 @@ contract KaliCurveTest is Test {
         kaliCurve.donate(1, bob, amount + 1 ether);
     }
 
-    // todo: try to refactor this beast
     // todo: and add custom errors tests
     function testLeave_NewUsers() public payable {
         testDonateWithDaoTreasury_NewUsers();
