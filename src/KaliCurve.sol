@@ -195,7 +195,9 @@ contract KaliCurve is Storage {
 
         // Validate mint conditions.
         uint256 burnPrice = this.getPrice(false, curveId);
-        if (donation != this.getPrice(true, curveId) || donation < burnPrice) revert InvalidAmount();
+        if (donation != this.getPrice(true, curveId) || donation != msg.value) {
+            revert InvalidAmount();
+        }
         if (msg.sender == owner) revert NotAuthorized();
 
         // Confirm ImpactDAO exists.
