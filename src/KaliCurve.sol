@@ -2,8 +2,6 @@
 pragma solidity >=0.8.4;
 
 import {LibString} from "solbase/utils/LibString.sol";
-import {IERC721} from "forge-std/interfaces/IERC721.sol";
-import {IERC20} from "forge-std/interfaces/IERC20.sol";
 
 import {IStorage} from "./interface/IStorage.sol";
 import {Storage} from "./Storage.sol";
@@ -194,7 +192,6 @@ contract KaliCurve is Storage {
         address owner = this.getCurveOwner(curveId);
 
         // Validate mint conditions.
-        uint256 burnPrice = this.getPrice(false, curveId);
         if (donation != this.getPrice(true, curveId) || donation != msg.value) {
             revert InvalidAmount();
         }
@@ -206,7 +203,7 @@ contract KaliCurve is Storage {
             impactDAO = summonDao(curveId, owner, patron);
 
             // Lock amount of burn price in contract to cover future burns.
-            totalDonation = donation - burnPrice;
+            totalDonation = donation - this.getPrice(false, curveId);
         } else {
             // Confirm new or recurring patron.
             if (IKaliTokenManager(impactDAO).balanceOf(patron) > 0) {
@@ -218,14 +215,12 @@ contract KaliCurve is Storage {
                 IKaliTokenManager(impactDAO).mintTokens(patron, 1 ether);
 
                 // Lock token amount in burn price to cover future burns.
-                totalDonation = donation - burnPrice;
+                totalDonation = donation - this.getPrice(false, curveId);
             }
         }
 
         // Distribute donation.
         addUnclaimed(this.getCurveTreasury(curveId) ? impactDAO : owner, totalDonation);
-
-        // Increment curve supply.
 
         emit Donated(curveId, patron, donation, incrementCurveSupply(curveId));
     }
